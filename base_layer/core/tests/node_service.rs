@@ -260,7 +260,7 @@ fn request_and_response_fetch_utxos() {
         assert_eq!(received_utxos.len(), 2);
         assert!(received_utxos.contains(&utxo1));
         assert!(received_utxos.contains(&utxo2));
-
+        println!("shutdown");
         alice_node.comms.shutdown().await;
         bob_node.comms.shutdown().await;
         carol_node.comms.shutdown().await;
@@ -727,3 +727,64 @@ fn local_submit_block() {
         node.comms.shutdown().await;
     });
 }
+
+//#[test]
+fn request_and_response_test() {
+    println!(" ");
+    println!("connect");
+    let mut runtime = Runtime::new().unwrap();
+    let factories = CryptoFactories::default();
+    let temp_dir = TempDir::new(string(8).as_str()).unwrap();
+    let (mut alice_node, bob_node, carol_node, _consensus_manager) =
+        create_network_with_3_base_nodes(&mut runtime, temp_dir.path().to_str().unwrap());
+
+    println!("Db Add");
+    let (utxo1, _) = create_utxo(MicroTari(10_000), &factories, None);
+    let hash1 = utxo1.hash();
+    let mut txn = DbTransaction::new();
+    txn.insert_utxo(utxo1.clone(), true);
+    assert!(bob_node.blockchain_db.commit(txn).is_ok());
+    let mut txn = DbTransaction::new();
+    txn.insert_utxo(utxo1.clone(), true);
+    assert!(carol_node.blockchain_db.commit(txn).is_ok());
+
+    runtime.block_on(async {
+        let received_utxos = alice_node.outbound_nci.fetch_utxos(vec![hash1.clone()]).await.unwrap();
+        println!("received_utxos.len()={:?}",received_utxos.len());
+        assert_eq!(received_utxos.len(), 1);
+        assert_eq!(received_utxos[0], utxo1);
+
+        println!("shutdown");
+        alice_node.comms.shutdown().await;
+        bob_node.comms.shutdown().await;
+        carol_node.comms.shutdown().await;
+    });
+/*
+    let mut runtime = Runtime::new().unwrap();
+    let temp_dir = TempDir::new(string(8).as_str()).unwrap();
+    let network = Network::LocalNet;
+    let (mut node, consensus_manager) =
+        BaseNodeBuilder::new(network).start(&mut runtime, temp_dir.path().to_str().unwrap());
+    let db = &node.blockchain_db;
+    let block0 = db.fetch_block(0).unwrap().block().clone();
+    let block1 = append_block(db, &block0, vec![], &consensus_manager.consensus_constants()).unwrap();
+
+    runtime.block_on(async {
+        let metadata = node.local_nci.get_metadata().await.unwrap();
+        assert_eq!(metadata.height_of_longest_chain, Some(1));
+
+        node.comms.shutdown().await;
+    });*/
+}
+
+#[test]
+fn iter_test() {
+    let _ = env_logger::try_init();
+    for i in 0..10 {
+        println!("  i={}",i);
+        request_and_response_test();
+    }
+    println!("done");
+    assert!(false);
+}
+
