@@ -161,8 +161,9 @@ impl Display for EmojiId {
 #[cfg(test)]
 mod test {
     use crate::util::emoji::EmojiId;
+    use rand::rngs::OsRng;
     use tari_core::transactions::types::PublicKey;
-    use tari_crypto::tari_utilities::hex::Hex;
+    use tari_crypto::{keys::PublicKey as PublicKeyTrait, tari_utilities::hex::Hex};
 
     #[test]
     fn convert_key() {
@@ -204,5 +205,16 @@ mod test {
             false,
             "Wrong checksum"
         );
+    }
+
+    #[test]
+    /// This test is just an easy way to generate a random PiblicKey and Emoji ID
+    fn random_emoji_id() {
+        let (_secret_key, public_key) = PublicKey::random_keypair(&mut OsRng);
+        let eid = EmojiId::from_hex(public_key.to_hex().as_str()).unwrap();
+
+        println!("Public Key: {}", public_key.to_hex());
+        println!("EmojiID: {}", eid);
+        assert!(true);
     }
 }
