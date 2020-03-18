@@ -69,6 +69,7 @@ pub enum BaseNodeCommand {
     ListPeers,
     ListConnections,
     Whoami,
+    EnableMining,
     Quit,
     Exit,
 }
@@ -86,6 +87,7 @@ pub struct Parser {
     wallet_output_service: OutputManagerHandle,
     node_service: LocalNodeCommsInterface,
     wallet_transaction_service: TransactionServiceHandle,
+    enable_miner: Arc<AtomicBool>,
 }
 
 // This will go through all instructions and look for potential matches
@@ -129,6 +131,7 @@ impl Parser {
             wallet_output_service: ctx.output_manager(),
             node_service: ctx.local_node(),
             wallet_transaction_service: ctx.wallet_transaction_service(),
+            enable_miner: ctx.miner_enabled(),
         }
     }
 
@@ -174,6 +177,9 @@ impl Parser {
             ListConnections => {
                 println!("Lists the peer connections currently held by this node");
             },
+            EnableMining => {
+                println!("Enable or disable the miner on this node, calling this command will swop the state");
+            },
             Whoami => {
                 println!(
                     "Display identity information about this node, including: public key, node ID and the public \
@@ -209,6 +215,9 @@ impl Parser {
             },
             ListConnections => {
                 self.process_list_connections();
+            },
+            EnableMining => {
+                self.process_enable_mining();
             },
             Whoami => {
                 self.process_whoami();
@@ -301,6 +310,12 @@ impl Parser {
                 },
             }
         });
+    }
+
+    fn process_enable_mining(&mut self) {
+        let new_state = !self.enable_miner.load(Ordering::SeqCst);
+        self.enable_miner.store(new_state, Ordering::SeqCst);
+        debug!("Mining state is now switched to {}", new_state);
     }
 
     fn process_whoami(&self) {
