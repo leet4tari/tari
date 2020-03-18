@@ -427,6 +427,7 @@ where
             node.get_interrupt_flag(),
             event_stream,
             rules,
+            config.mining_threads,
         ))
     } else {
         debug!(
