@@ -32,7 +32,7 @@ RUN apt update && apt install \
     # Standard config for the tor client
     printf "SocksPort 127.0.0.1:9050\nControlPort 127.0.0.1:9051\nCookieAuthentication 0\nClientOnly 1\nClientUseIPv6 1" > /etc/tor/torrc && \
     # start.sh script to run tor, sleep 15 seconds and start the base node
-    printf "#!/bin/bash\ntor &\nsleep 15\nif [[ ! -f ~/.tari/config.toml ]]; then\n  tari_base_node --init --create-id\nfi\ntari_base_node" > /usr/bin/start.sh && \
+    printf "#!/bin/bash\ntor &\nsleep 15\nif [[ ! -f ~/.tari/config.toml ]]; then\n  tari_base_node --init --create-id\nfi\ncd ~/.tari\ntari_base_node" > /usr/bin/start.sh && \
     chmod +x /usr/bin/start.sh
 
 
@@ -45,5 +45,7 @@ COPY --from=builder /tari_base_node/common/logging/log4rs-sample.yml /root/.tari
 
 # Keep the .tari directory in a volume by default
 VOLUME ["/root/.tari"]
+# gRPC interface by default
+EXPOSE 18142
 # Use start.sh to run tor then the base node or tari_base_node for the executable
 CMD ["start.sh"]
