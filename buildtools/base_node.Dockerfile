@@ -14,7 +14,7 @@ RUN rustc --print cfg
 # -Z insert-sideeffect
 # --emit=llvm-ir -C opt-level=1 -Z mir-opt-level=2
 #RUN RUSTFLAGS="-C target-feature=+crt-static -C target_cpu=nehalem" cargo build -p tari_base_node --release
-RUN RUSTFLAGS="-C target-cpu=haswell" cargo build --verbose -p tari_base_node --release
+RUN RUSTFLAGS="-C target-cpu=skylake" cargo build --verbose -p tari_base_node --release
 
 # Create a base minimal image for adding our executables to
 FROM bitnami/minideb:stretch as base
