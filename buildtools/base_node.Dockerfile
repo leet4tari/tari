@@ -7,7 +7,14 @@ ADD . /tari_base_node
 WORKDIR /tari_base_node
 
 RUN rustup component add rustfmt --toolchain nightly-2020-01-08-x86_64-unknown-linux-gnu
-RUN RUSTFLAGS="-C target_cpu=nehalem" cargo build -p tari_base_node --release
+RUN rustc --print target-cpus
+RUN rustc --print target-features
+RUN rustc --print cfg
+# rustc --print cfg -C target-cpu=native -C opt-level=3
+# -Z insert-sideeffect
+# --emit=llvm-ir -C opt-level=1 -Z mir-opt-level=2
+#RUN RUSTFLAGS="-C target_cpu=nehalem" cargo build -p tari_base_node --release
+RUN RUSTFLAGS="-C target-feature=+crt-static -C target_cpu=nehalem" cargo build -p tari_base_node --release
 
 # Create a base minimal image for adding our executables to
 FROM bitnami/minideb:stretch as base
