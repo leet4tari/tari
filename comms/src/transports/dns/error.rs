@@ -1,4 +1,4 @@
-//  Copyright 2019 The Tari Project
+//  Copyright 2020, The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,53 +20,32 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use futures::channel::oneshot::Sender as OneshotSender;
-use rand::RngCore;
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::RwLock;
+use crate::{multiaddr::Multiaddr, socks::SocksError};
+use std::{borrow::Cow, io};
+use thiserror::Error;
+use tokio::task::JoinError;
 
-pub type RequestKey = u64;
-
-/// Generate a new random request key to uniquely identify a request and its corresponding responses.
-pub fn generate_request_key<R>(rng: &mut R) -> RequestKey
-where R: RngCore {
-    rng.next_u64()
-}
-
-/// WaitingRequests is used to keep track of a set of WaitingRequests.
-pub struct WaitingRequests<T> {
-    requests: Arc<RwLock<HashMap<RequestKey, Option<OneshotSender<T>>>>>,
-}
-
-impl<T> WaitingRequests<T> {
-    /// Create a new set of waiting requests.
-    pub fn new() -> Self {
-        Self {
-            requests: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    /// Insert a new waiting request.
-    pub async fn insert(&self, key: RequestKey, reply_tx: Option<OneshotSender<T>>) {
-        self.requests.write().await.insert(key, reply_tx);
-    }
-
-    /// Remove the waiting request corresponding to the provided key.
-    pub async fn remove(&self, key: RequestKey) -> Option<OneshotSender<T>> {
-        self.requests.write().await.remove(&key).unwrap_or(None)
-    }
-}
-
-impl<T> Clone for WaitingRequests<T> {
-    fn clone(&self) -> Self {
-        Self {
-            requests: self.requests.clone(),
-        }
-    }
-}
-
-impl<T> Default for WaitingRequests<T> {
-    fn default() -> Self {
-        WaitingRequests::new()
-    }
+#[derive(Debug, Error)]
+pub enum DnsResolverError {
+    #[error("The address is empty")]
+    EmptyAddress,
+    #[error("Invalid address '{address}': {message}")]
+    InvalidAddress {
+        address: Multiaddr,
+        message: Cow<'static, str>,
+    },
+    #[error("DNS Resolution: address '{0}' is not supported")]
+    UnsupportedAddress(Multiaddr),
+    #[error("DNS Resolution: Expected a TCP/IP address, got '{0}'")]
+    ExpectedTcpIpAddress(Multiaddr),
+    #[error("DNS Resolution: Could not connect to proxy: {0}")]
+    ProxyConnectFailed(io::Error),
+    #[error("SOCKS error: {0}")]
+    SocksError(#[from] SocksError),
+    #[error("Name resolution failed for address `{address_str}`: {source}")]
+    NameResolutionFailed { address_str: String, source: io::Error },
+    #[error("DNS address not found")]
+    DnsAddressNotFound,
+    #[error("Failed to join on blocking task: {0}")]
+    BlockingJoinError(#[from] JoinError),
 }

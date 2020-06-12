@@ -109,7 +109,7 @@ pub enum DhtRequest {
     /// Fetch selected peers according to the broadcast strategy
     SelectPeers(BroadcastStrategy, oneshot::Sender<Vec<NodeId>>),
     GetMetadata(DhtMetadataKey, oneshot::Sender<Result<Option<Vec<u8>>, DhtActorError>>),
-    SetMetadata(DhtMetadataKey, Vec<u8>),
+    SetMetadata(DhtMetadataKey, Vec<u8>, oneshot::Sender<Result<(), DhtActorError>>),
 }
 
 impl Display for DhtRequest {
@@ -119,8 +119,10 @@ impl Display for DhtRequest {
             SendJoin => f.write_str("SendJoin"),
             MsgHashCacheInsert(_, _) => f.write_str("MsgHashCacheInsert"),
             SelectPeers(s, _) => f.write_str(&format!("SelectPeers (Strategy={})", s)),
-            GetMetadata(key, _) => f.write_str(&format!("GetSetting (key={})", key)),
-            SetMetadata(key, value) => f.write_str(&format!("SetSetting (key={}, value={} bytes)", key, value.len())),
+            GetMetadata(key, _) => f.write_str(&format!("GetMetadata (key={})", key)),
+            SetMetadata(key, value, _) => {
+                f.write_str(&format!("SetMetadata (key={}, value={} bytes)", key, value.len()))
+            },
         }
     }
 }
@@ -168,9 +170,10 @@ impl DhtRequester {
     }
 
     pub async fn set_metadata<T: MessageFormat>(&mut self, key: DhtMetadataKey, value: T) -> Result<(), DhtActorError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
         let bytes = value.to_binary().map_err(DhtActorError::FailedToSerializeValue)?;
-        self.sender.send(DhtRequest::SetMetadata(key, bytes)).await?;
-        Ok(())
+        self.sender.send(DhtRequest::SetMetadata(key, bytes, reply_tx)).await?;
+        reply_rx.await.map_err(|_| DhtActorError::ReplyCanceled)?
     }
 }
 
@@ -317,15 +320,17 @@ impl DhtActor {
                     Ok(())
                 })
             },
-            SetMetadata(key, value) => {
+            SetMetadata(key, value, reply_tx) => {
                 let db = self.database.clone();
                 Box::pin(async move {
                     match db.set_metadata_value_bytes(key, value).await {
                         Ok(_) => {
-                            debug!(target: LOG_TARGET, "Dht setting '{}' set", key);
+                            debug!(target: LOG_TARGET, "Dht metadata '{}' set", key);
+                            let _ = reply_tx.send(Ok(()));
                         },
                         Err(err) => {
-                            warn!(target: LOG_TARGET, "set_setting failed because {:?}", err);
+                            warn!(target: LOG_TARGET, "Unable to set metadata because {:?}", err);
+                            let _ = reply_tx.send(Err(err.into()));
                         },
                     }
                     Ok(())
@@ -567,35 +572,22 @@ impl DhtActor {
         let query = PeerQuery::new()
             .select_where(|peer| {
                 if peer.is_banned() {
-                    trace!(target: LOG_TARGET, "[{}] is banned", peer.node_id);
                     banned_count += 1;
                     return false;
                 }
 
                 if !peer.features.contains(features) {
-                    trace!(
-                        target: LOG_TARGET,
-                        "[{}] is does not have the required features {:?}",
-                        peer.node_id,
-                        features
-                    );
                     filtered_out_node_count += 1;
                     return false;
                 }
 
                 if peer.is_offline() {
-                    trace!(
-                        target: LOG_TARGET,
-                        "[{}] suffered too many connection attempt failures or is offline",
-                        peer.node_id
-                    );
                     connect_ineligable_count += 1;
                     return false;
                 }
 
                 let is_excluded = excluded_peers.contains(&peer.node_id);
                 if is_excluded {
-                    trace!(target: LOG_TARGET, "[{}] is explicitly excluded", peer.node_id);
                     excluded_count += 1;
                     return false;
                 }

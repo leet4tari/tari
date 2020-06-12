@@ -1,4 +1,4 @@
-//  Copyright 2019 The Tari Project
+//  Copyright 2020, The Tari Project
 //
 //  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the
 //  following conditions are met:
@@ -20,53 +20,33 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use futures::channel::oneshot::Sender as OneshotSender;
-use rand::RngCore;
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::RwLock;
+use super::error::DnsResolverError;
+use crate::multiaddr::{Multiaddr, Protocol};
+use std::net::SocketAddr;
 
-pub type RequestKey = u64;
-
-/// Generate a new random request key to uniquely identify a request and its corresponding responses.
-pub fn generate_request_key<R>(rng: &mut R) -> RequestKey
-where R: RngCore {
-    rng.next_u64()
-}
-
-/// WaitingRequests is used to keep track of a set of WaitingRequests.
-pub struct WaitingRequests<T> {
-    requests: Arc<RwLock<HashMap<RequestKey, Option<OneshotSender<T>>>>>,
-}
-
-impl<T> WaitingRequests<T> {
-    /// Create a new set of waiting requests.
-    pub fn new() -> Self {
-        Self {
-            requests: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    /// Insert a new waiting request.
-    pub async fn insert(&self, key: RequestKey, reply_tx: Option<OneshotSender<T>>) {
-        self.requests.write().await.insert(key, reply_tx);
-    }
-
-    /// Remove the waiting request corresponding to the provided key.
-    pub async fn remove(&self, key: RequestKey) -> Option<OneshotSender<T>> {
-        self.requests.write().await.remove(&key).unwrap_or(None)
+pub fn is_dns4_addr(addr: &Multiaddr) -> bool {
+    let proto = addr.iter().next();
+    match proto {
+        Some(Protocol::Dns4(_)) => true,
+        _ => false,
     }
 }
 
-impl<T> Clone for WaitingRequests<T> {
-    fn clone(&self) -> Self {
-        Self {
-            requests: self.requests.clone(),
-        }
+pub fn convert_tcpip_multiaddr_to_socketaddr(addr: &Multiaddr) -> Result<SocketAddr, DnsResolverError> {
+    match extract_protocols(addr)? {
+        (Protocol::Ip4(host), Protocol::Tcp(port)) => Ok((host, port).into()),
+        (Protocol::Ip6(host), Protocol::Tcp(port)) => Ok((host, port).into()),
+        _ => Err(DnsResolverError::ExpectedTcpIpAddress(addr.clone())),
     }
 }
 
-impl<T> Default for WaitingRequests<T> {
-    fn default() -> Self {
-        WaitingRequests::new()
-    }
+pub fn extract_protocols(addr: &Multiaddr) -> Result<(Protocol<'_>, Protocol<'_>), DnsResolverError> {
+    let mut addr_iter = addr.iter();
+    let proto1 = addr_iter.next().ok_or_else(|| DnsResolverError::EmptyAddress)?;
+    let proto2 = addr_iter.next().ok_or_else(|| DnsResolverError::InvalidAddress {
+        address: addr.clone(),
+        message: "Address does not consist of at least 2 parts".into(),
+    })?;
+
+    Ok((proto1, proto2))
 }

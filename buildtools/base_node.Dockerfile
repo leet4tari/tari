@@ -1,15 +1,17 @@
 #FROM rust:1.42.0 as builder
-FROM quay.io/tarilabs/rust_tari-build-with-deps:nightly-2020-01-08 as builder
+FROM quay.io/tarilabs/rust_tari-build-with-deps:nightly-2020-06-10 as builder
 
 # Copy the dependency lists
 #ADD Cargo.toml ./
 ADD . /tari_base_node
 WORKDIR /tari_base_node
 
-RUN rustup component add rustfmt --toolchain nightly-2020-01-08-x86_64-unknown-linux-gnu
+#RUN rustup component add rustfmt --toolchain nightly-2020-01-08-x86_64-unknown-linux-gnu
+RUN rustup component add rustfmt --toolchain nightly-2020-06-10-x86_64-unknown-linux-gnu
 RUN rustc --print target-cpus
 RUN rustc --print target-features
 RUN rustc --print cfg
+#RUN cargo build -p tari_base_node --release
 # rustc --print cfg -C target-cpu=native -C opt-level=3
 # -Z insert-sideeffect
 # --emit=llvm-ir -C opt-level=1 -Z mir-opt-level=2

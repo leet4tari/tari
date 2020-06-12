@@ -57,7 +57,7 @@ use tari_comms::peer_manager::NodeId;
 use tari_comms_dht::{
     domain_message::OutboundDomainMessage,
     envelope::NodeDestination,
-    outbound::{OutboundEncryption, OutboundMessageRequester},
+    outbound::{DhtOutboundError, OutboundEncryption, OutboundMessageRequester},
 };
 use tari_crypto::tari_utilities::hex::Hex;
 use tari_p2p::{domain_message::DomainMessage, tari_message::TariMessageType};
@@ -376,7 +376,6 @@ async fn handle_incoming_request<B: BlockchainBackend + 'static>(
     outbound_message_service
         .send_direct(
             origin_public_key,
-            OutboundEncryption::None,
             OutboundDomainMessage::new(TariMessageType::MempoolResponse, message),
         )
         .await?;
@@ -394,7 +393,7 @@ async fn handle_incoming_response(
         .and_then(|r| r.try_into().ok())
         .ok_or_else(|| MempoolServiceError::InvalidResponse("Received an invalid mempool response".to_string()))?;
 
-    if let Some(reply_tx) = waiting_requests.remove(request_key)? {
+    if let Some(reply_tx) = waiting_requests.remove(request_key).await {
         let _ = reply_tx.send(Ok(response).or_else(|resp| {
             warn!(
                 target: LOG_TARGET,
@@ -429,21 +428,17 @@ async fn handle_outbound_request(
             OutboundEncryption::None,
             OutboundDomainMessage::new(TariMessageType::MempoolRequest, service_request),
         )
-        .await
-        .or_else(|e| {
-            error!(target: LOG_TARGET, "mempool outbound request failure. {:?}", e);
-            Err(e)
-        })
-        .map_err(|e| MempoolServiceError::OutboundMessageService(e.to_string()))?;
+        .await;
 
-    match send_result.resolve_ok().await {
-        Some(send_states) if !send_states.is_empty() => {
+    match send_result {
+        Ok(_) => {
             // Spawn timeout and wait for matching response to arrive
-            waiting_requests.insert(request_key, Some(reply_tx))?;
+            waiting_requests.insert(request_key, Some(reply_tx)).await;
             // Spawn timeout for waiting_request
             spawn_request_timeout(timeout_sender, request_key, config.request_timeout);
+            Ok(())
         },
-        Some(_) => {
+        Err(DhtOutboundError::NoMessagesQueued) => {
             let _ = reply_tx.send(Err(MempoolServiceError::NoBootstrapNodesConfigured).or_else(|resp| {
                 error!(
                     target: LOG_TARGET,
@@ -451,21 +446,14 @@ async fn handle_outbound_request(
                 );
                 Err(resp)
             }));
+
+            Ok(())
         },
-        None => {
-            let _ = reply_tx
-                .send(Err(MempoolServiceError::BroadcastFailed))
-                .or_else(|resp| {
-                    error!(
-                        target: LOG_TARGET,
-                        "Failed to send outbound request because DHT outbound broadcast failed"
-                    );
-                    Err(resp)
-                });
+        Err(e) => {
+            error!(target: LOG_TARGET, "mempool outbound request failure. {:?}", e);
+            Err(MempoolServiceError::OutboundMessageService(e.to_string()))
         },
     }
-
-    Ok(())
 }
 
 async fn handle_incoming_tx<B: BlockchainBackend + 'static>(
@@ -498,7 +486,7 @@ async fn handle_request_timeout(
     request_key: RequestKey,
 ) -> Result<(), MempoolServiceError>
 {
-    if let Some(reply_tx) = waiting_requests.remove(request_key)? {
+    if let Some(reply_tx) = waiting_requests.remove(request_key).await {
         let reply_msg = Err(MempoolServiceError::RequestTimedOut);
         let _ = reply_tx.send(reply_msg.or_else(|resp| {
             error!(

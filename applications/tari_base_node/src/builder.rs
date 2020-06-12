@@ -483,6 +483,7 @@ where
     let db_config = BlockchainDatabaseConfig {
         orphan_storage_capacity: config.orphan_storage_capacity,
         pruning_horizon: config.pruning_horizon,
+        pruned_mode_cleanup_interval: config.pruned_mode_cleanup_interval,
     };
     let db = BlockchainDatabase::new(backend, &rules, validators, db_config).map_err(|e| e.to_string())?;
     let mempool_validator =
@@ -978,6 +979,8 @@ async fn setup_base_node_comms(
     publisher: PubsubDomainConnector,
 ) -> Result<(CommsNode, Dht), String>
 {
+    // Ensure that the node identity has the correct public address
+    node_identity.set_public_address(config.public_address.clone());
     let comms_config = CommsConfig {
         node_identity,
         transport_type: setup_transport_type(&config),

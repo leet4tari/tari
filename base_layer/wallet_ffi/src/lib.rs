@@ -178,7 +178,7 @@ use tari_wallet::{
             sqlite_db::TransactionServiceSqliteDatabase,
         },
     },
-    util::emoji::EmojiId,
+    util::emoji::{emoji_set, EmojiId},
     wallet::WalletConfig,
 };
 use tokio::runtime::Runtime;
@@ -211,8 +211,13 @@ pub struct TariPendingInboundTransactions(Vec<TariPendingInboundTransaction>);
 
 pub struct TariPendingOutboundTransactions(Vec<TariPendingOutboundTransaction>);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct ByteVector(Vec<c_uchar>); // declared like this so that it can be exposed to external header
+
+#[derive(Debug, PartialEq)]
+pub struct EmojiSet(Vec<ByteVector>);
+
+pub struct TariSeedWords(Vec<String>);
 
 /// -------------------------------- Strings ------------------------------------------------ ///
 
@@ -707,6 +712,89 @@ pub unsafe extern "C" fn private_key_from_hex(key: *const c_char, error_out: *mu
 }
 
 /// -------------------------------------------------------------------------------------------- ///
+/// ----------------------------------- Seed Words ----------------------------------------------///
+
+/// Gets the length of TariSeedWords
+///
+/// ## Arguments
+/// `seed_words` - The pointer to a TariSeedWords
+/// `error_out` - Pointer to an int which will be modified to an error code should one occur, may not be null. Functions
+/// as an out parameter.
+///
+/// ## Returns
+/// `c_uint` - Returns number of elements in , zero if contacts is null
+///
+/// # Safety
+/// None
+#[no_mangle]
+pub unsafe extern "C" fn seed_words_get_length(seed_words: *const TariSeedWords, error_out: *mut c_int) -> c_uint {
+    let mut error = 0;
+    ptr::swap(error_out, &mut error as *mut c_int);
+    let mut len = 0;
+    if seed_words.is_null() {
+        error = LibWalletError::from(InterfaceError::NullError("seed words".to_string())).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+    } else {
+        len = (*seed_words).0.len();
+    }
+    len as c_uint
+}
+
+/// Gets a seed word from TariSeedWords at position
+///
+/// ## Arguments
+/// `seed_words` - The pointer to a TariSeedWords
+/// `position` - The integer position
+/// `error_out` - Pointer to an int which will be modified to an error code should one occur, may not be null. Functions
+/// as an out parameter.
+///
+/// ## Returns
+/// `*mut c_char` - Returns a pointer to a char array. Note that it returns an empty char array if
+/// TariSeedWords collection is null or the position is invalid
+///
+/// # Safety
+/// The ```string_destroy``` method must be called when finished with a string from rust to prevent a memory leak
+#[no_mangle]
+pub unsafe extern "C" fn seed_words_get_at(
+    seed_words: *mut TariSeedWords,
+    position: c_uint,
+    error_out: *mut c_int,
+) -> *mut c_char
+{
+    let mut error = 0;
+    ptr::swap(error_out, &mut error as *mut c_int);
+    let mut word = CString::new("").unwrap();
+    if seed_words.is_null() {
+        error = LibWalletError::from(InterfaceError::NullError("seed words".to_string())).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+    } else {
+        let len = (*seed_words).0.len();
+        if position > len as u32 {
+            error = LibWalletError::from(InterfaceError::PositionInvalidError).code;
+            ptr::swap(error_out, &mut error as *mut c_int);
+        } else {
+            word = CString::new((*seed_words).0[position as usize].clone()).unwrap()
+        }
+    }
+    CString::into_raw(word)
+}
+
+/// Frees memory for a TariSeedWords
+///
+/// ## Arguments
+/// `seed_words` - The pointer to a TariSeedWords
+///
+/// ## Returns
+/// `()` - Does not return a value, equivalent to void in C
+///
+/// # Safety
+/// None
+#[no_mangle]
+pub unsafe extern "C" fn seed_words_destroy(seed_words: *mut TariSeedWords) {
+    if !seed_words.is_null() {
+        Box::from_raw(seed_words);
+    }
+}
 
 /// ----------------------------------- Contact -------------------------------------------------///
 
@@ -4014,6 +4102,197 @@ pub unsafe extern "C" fn wallet_coin_split(
     }
 }
 
+/// Gets the seed words representing the seed private key of the provided `TariWallet`.
+///
+/// ## Arguments
+/// `wallet` - The TariWallet pointer
+/// `error_out` - Pointer to an int which will be modified to an error code should one occur, may not be null. Functions
+/// as an out parameter.
+///
+/// ## Returns
+/// `*mut TariSeedWords` - A collection of the seed words
+///
+/// # Safety
+/// The ```tari_seed_words_destroy``` method must be called when finished with a
+/// TariSeedWords to prevent a memory leak
+#[no_mangle]
+pub unsafe extern "C" fn wallet_get_seed_words(wallet: *mut TariWallet, error_out: *mut c_int) -> *mut TariSeedWords {
+    let mut error = 0;
+    ptr::swap(error_out, &mut error as *mut c_int);
+    if wallet.is_null() {
+        error = LibWalletError::from(InterfaceError::NullError("wallet".to_string())).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+        return ptr::null_mut();
+    }
+
+    match (*wallet)
+        .runtime
+        .block_on((*wallet).output_manager_service.get_seed_words())
+    {
+        Ok(sw) => Box::into_raw(Box::new(TariSeedWords(sw.clone()))),
+        Err(e) => {
+            error = LibWalletError::from(WalletError::OutputManagerError(e)).code;
+            ptr::swap(error_out, &mut error as *mut c_int);
+            ptr::null_mut()
+        },
+    }
+}
+
+/// Set the power mode of the wallet to Low Power mode which will reduce the amount of network operations the wallet
+/// performs to conserve power
+///
+/// ## Arguments
+/// `wallet` - The TariWallet pointer
+/// `error_out` - Pointer to an int which will be modified to an error code should one occur, may not be null. Functions
+/// as an out parameter.
+/// # Safety
+/// None
+#[no_mangle]
+pub unsafe extern "C" fn wallet_set_low_power_mode(wallet: *mut TariWallet, error_out: *mut c_int) {
+    let mut error = 0;
+    ptr::swap(error_out, &mut error as *mut c_int);
+    if wallet.is_null() {
+        error = LibWalletError::from(InterfaceError::NullError("wallet".to_string())).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+        return;
+    }
+
+    if let Err(e) = (*wallet)
+        .runtime
+        .block_on((*wallet).transaction_service.set_low_power_mode())
+    {
+        error = LibWalletError::from(WalletError::TransactionServiceError(e)).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+    }
+}
+
+/// Set the power mode of the wallet to Normal Power mode which will then use the standard level of network traffic
+///
+/// ## Arguments
+/// `wallet` - The TariWallet pointer
+/// `error_out` - Pointer to an int which will be modified to an error code should one occur, may not be null. Functions
+/// as an out parameter.
+/// # Safety
+/// None
+#[no_mangle]
+pub unsafe extern "C" fn wallet_set_normal_power_mode(wallet: *mut TariWallet, error_out: *mut c_int) {
+    let mut error = 0;
+    ptr::swap(error_out, &mut error as *mut c_int);
+    if wallet.is_null() {
+        error = LibWalletError::from(InterfaceError::NullError("wallet".to_string())).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+        return;
+    }
+
+    if let Err(e) = (*wallet)
+        .runtime
+        .block_on((*wallet).transaction_service.set_normal_power_mode())
+    {
+        error = LibWalletError::from(WalletError::TransactionServiceError(e)).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+    }
+}
+
+/// Gets the current emoji set
+///
+/// ## Arguments
+/// `()` - Does not take any arguments
+///
+/// ## Returns
+/// `*mut EmojiSet` - Pointer to the created EmojiSet.
+///
+/// # Safety
+/// The ```emoji_set_destroy``` function must be called when finished with a ByteVector to prevent a memory leak
+#[no_mangle]
+pub unsafe extern "C" fn get_emoji_set() -> *mut EmojiSet {
+    let current_emoji_set = emoji_set();
+    let mut emoji_set: Vec<ByteVector> = Vec::with_capacity(current_emoji_set.len());
+    for emoji in current_emoji_set.iter() {
+        let mut b = [0; 4]; // emojis are 4 bytes, unicode character
+        let emoji_char = ByteVector(emoji.encode_utf8(&mut b).as_bytes().to_vec());
+        emoji_set.push(emoji_char);
+    }
+    let result = EmojiSet(emoji_set);
+    Box::into_raw(Box::new(result))
+}
+
+/// Gets the length of the current emoji set
+///
+/// ## Arguments
+/// `*mut EmojiSet` - Pointer to emoji set
+///
+/// ## Returns
+/// `c_int` - Pointer to the created EmojiSet.
+///
+/// # Safety
+/// None
+#[no_mangle]
+pub unsafe extern "C" fn emoji_set_get_length(emoji_set: *const EmojiSet, error_out: *mut c_int) -> c_uint {
+    let mut error = 0;
+    ptr::swap(error_out, &mut error as *mut c_int);
+    if emoji_set.is_null() {
+        error = LibWalletError::from(InterfaceError::NullError("emoji_set".to_string())).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+        return 0;
+    }
+    (*emoji_set).0.len() as c_uint
+}
+
+/// Gets a ByteVector at position in a EmojiSet
+///
+/// ## Arguments
+/// `emoji_set` - The pointer to a EmojiSet
+/// `position` - The integer position
+/// `error_out` - Pointer to an int which will be modified to an error code should one occur, may not be null. Functions
+/// as an out parameter.
+///
+/// ## Returns
+/// `ByteVector` - Returns a ByteVector. Note that the ByteVector will be null if ptr
+/// is null or if the position is invalid
+///
+/// # Safety
+/// The ```byte_vector_destroy``` function must be called when finished with the ByteVector to prevent a memory leak.
+#[no_mangle]
+pub unsafe extern "C" fn emoji_set_get_at(
+    emoji_set: *const EmojiSet,
+    position: c_uint,
+    error_out: *mut c_int,
+) -> *mut ByteVector
+{
+    let mut error = 0;
+    ptr::swap(error_out, &mut error as *mut c_int);
+    if emoji_set.is_null() {
+        error = LibWalletError::from(InterfaceError::NullError("emoji_set".to_string())).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+        return ptr::null_mut();
+    }
+    let last_index = emoji_set_get_length(emoji_set, error_out) - 1;
+    if position > last_index {
+        error = LibWalletError::from(InterfaceError::PositionInvalidError).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+        return ptr::null_mut();
+    }
+    let result = (*emoji_set).0[position as usize].clone();
+    Box::into_raw(Box::new(result))
+}
+
+/// Frees memory for a EmojiSet
+///
+/// ## Arguments
+/// `emoji_set` - The EmojiSet pointer
+///
+/// ## Returns
+/// `()` - Does not return a value, equivalent to void in C
+///
+/// # Safety
+/// None
+#[no_mangle]
+pub unsafe extern "C" fn emoji_set_destroy(emoji_set: *mut EmojiSet) {
+    if !emoji_set.is_null() {
+        Box::from_raw(emoji_set);
+    }
+}
+
 /// Frees memory for a TariWallet
 ///
 /// ## Arguments
@@ -4054,9 +4333,19 @@ mod test {
 
     use crate::*;
     use libc::{c_char, c_uchar, c_uint};
-    use std::{ffi::CString, sync::Mutex, thread};
-    use tari_core::transactions::tari_amount::uT;
-    use tari_wallet::{testnet_utils::random_string, transaction_service::storage::database::TransactionStatus};
+    use std::{
+        ffi::CString,
+        str::{from_utf8, FromStr},
+        sync::Mutex,
+        thread,
+    };
+    use tari_core::transactions::{tari_amount::uT, types::PrivateKey};
+    use tari_key_manager::mnemonic::Mnemonic;
+    use tari_wallet::{
+        testnet_utils::random_string,
+        transaction_service::storage::database::TransactionStatus,
+        util::emoji,
+    };
     use tempdir::TempDir;
 
     fn type_of<T>(_: T) -> String {
@@ -4300,6 +4589,35 @@ mod test {
                 LibWalletError::from(InterfaceError::NullError("bytes_ptr".to_string())).code
             );
             byte_vector_destroy(bytes_ptr);
+        }
+    }
+
+    #[test]
+    fn test_emoji_set() {
+        unsafe {
+            let emoji_set = get_emoji_set();
+            let compare_emoji_set = emoji::emoji_set();
+            let mut error = 0;
+            let error_ptr = &mut error as *mut c_int;
+            let len = emoji_set_get_length(emoji_set, error_ptr);
+            assert_eq!(error, 0);
+            for i in 0..len {
+                let emoji_byte_vector = emoji_set_get_at(emoji_set, i as c_uint, error_ptr);
+                assert_eq!(error, 0);
+                let emoji_byte_vector_length = byte_vector_get_length(emoji_byte_vector, error_ptr);
+                assert_eq!(error, 0);
+                let mut emoji_bytes = Vec::new();
+                for c in 0..emoji_byte_vector_length {
+                    let byte = byte_vector_get_at(emoji_byte_vector, c as c_uint, error_ptr);
+                    assert_eq!(error, 0);
+                    emoji_bytes.push(byte);
+                }
+                let emoji = char::from_str(from_utf8(emoji_bytes.as_slice()).unwrap()).unwrap();
+                let compare = compare_emoji_set[i as usize] == emoji;
+                byte_vector_destroy(emoji_byte_vector);
+                assert_eq!(compare, true);
+            }
+            emoji_set_destroy(emoji_set);
         }
     }
 
@@ -4895,6 +5213,24 @@ mod test {
             assert_eq!(split_tx.is_ok(), true);
             string_destroy(split_msg_str as *mut c_char);
 
+            wallet_set_low_power_mode(alice_wallet, error_ptr);
+            assert_eq!((*error_ptr), 0);
+            wallet_set_normal_power_mode(alice_wallet, error_ptr);
+            assert_eq!((*error_ptr), 0);
+
+            // Test seed words
+            let seed_words = wallet_get_seed_words(alice_wallet, error_ptr);
+            let seed_word_len = seed_words_get_length(seed_words, error_ptr);
+
+            let mut seed_words_vec = Vec::new();
+            for i in 0..seed_word_len {
+                let word = seed_words_get_at(seed_words, i as c_uint, error_ptr);
+                let word_string = CString::from_raw(word).to_str().unwrap().to_owned();
+                seed_words_vec.push(word_string);
+            }
+            let _seed_word_private_key = PrivateKey::from_mnemonic(&seed_words_vec)
+                .expect("Seed words should be able to convert to private key");
+
             let lock = CALLBACK_STATE_FFI.lock().unwrap();
             assert!(lock.received_tx_callback_called);
             assert!(lock.received_tx_reply_callback_called);
@@ -4925,6 +5261,7 @@ mod test {
             comms_config_destroy(alice_config);
             transport_type_destroy(transport_type_alice);
             transport_type_destroy(transport_type_bob);
+            seed_words_destroy(seed_words);
         }
     }
 }

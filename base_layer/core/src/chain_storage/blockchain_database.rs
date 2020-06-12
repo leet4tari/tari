@@ -23,7 +23,11 @@
 use crate::{
     blocks::{blockheader::BlockHash, Block, BlockHeader, NewBlockTemplate},
     chain_storage::{
-        consts::{BLOCKCHAIN_DATABASE_ORPHAN_STORAGE_CAPACITY, BLOCKCHAIN_DATABASE_PRUNING_HORIZON},
+        consts::{
+            BLOCKCHAIN_DATABASE_ORPHAN_STORAGE_CAPACITY,
+            BLOCKCHAIN_DATABASE_PRUNED_MODE_CLEANUP_INTERVAL,
+            BLOCKCHAIN_DATABASE_PRUNING_HORIZON,
+        },
         db_transaction::{DbKey, DbKeyValuePair, DbTransaction, DbValue, MetadataKey, MetadataValue, MmrTree},
         error::ChainStorageError,
         ChainMetadata,
@@ -55,6 +59,7 @@ const LOG_TARGET: &str = "c::cs::database";
 pub struct BlockchainDatabaseConfig {
     pub orphan_storage_capacity: usize,
     pub pruning_horizon: u64,
+    pub pruned_mode_cleanup_interval: u64,
 }
 
 impl Default for BlockchainDatabaseConfig {
@@ -62,6 +67,7 @@ impl Default for BlockchainDatabaseConfig {
         Self {
             orphan_storage_capacity: BLOCKCHAIN_DATABASE_ORPHAN_STORAGE_CAPACITY,
             pruning_horizon: BLOCKCHAIN_DATABASE_PRUNING_HORIZON,
+            pruned_mode_cleanup_interval: BLOCKCHAIN_DATABASE_PRUNED_MODE_CLEANUP_INTERVAL,
         }
     }
 }
@@ -162,6 +168,8 @@ pub trait BlockchainBackend: Send + Sync {
     /// Fetches the set of leaf node hashes and their deletion status' for the nth to nth+count leaf node index in the
     /// given MMR tree.
     fn fetch_mmr_nodes(&self, tree: MmrTree, pos: u32, count: u32) -> Result<Vec<(Hash, bool)>, ChainStorageError>;
+    /// Fetches the leaf index of the provided leaf node hash in the given MMR tree.
+    fn fetch_mmr_leaf_index(&self, tree: MmrTree, hash: &Hash) -> Result<Option<u32>, ChainStorageError>;
     /// Performs the function F for each orphan block in the orphan pool.
     fn for_each_orphan<F>(&self, f: F) -> Result<(), ChainStorageError>
     where
@@ -491,13 +499,32 @@ where T: BlockchainBackend
         }
 
         let mut db = self.db_write_access()?;
-        add_block(
+        let block_add_result = add_block(
             &mut db,
             &self.validators.block,
             &self.validators.accum_difficulty,
             block,
-            self.config.orphan_storage_capacity,
-        )
+        )?;
+
+        // Cleanup orphan block pool
+        match block_add_result {
+            BlockAddResult::OrphanBlock | BlockAddResult::ChainReorg(_) => {
+                cleanup_orphans(&mut db, self.config.orphan_storage_capacity)?
+            },
+            _ => {},
+        }
+
+        // Cleanup of backend when in pruned mode.
+        match block_add_result {
+            BlockAddResult::Ok | BlockAddResult::ChainReorg(_) => cleanup_pruned_mode(
+                &mut db,
+                self.config.pruned_mode_cleanup_interval,
+                self.config.pruning_horizon,
+            )?,
+            _ => {},
+        }
+
+        Ok(block_add_result)
     }
 
     fn store_new_block(&self, block: Block) -> Result<(), ChainStorageError> {
@@ -622,8 +649,14 @@ pub fn is_utxo<T: BlockchainBackend>(db: &T, hash: HashOutput) -> Result<bool, C
 }
 
 pub fn is_stxo<T: BlockchainBackend>(db: &T, hash: HashOutput) -> Result<bool, ChainStorageError> {
-    let key = DbKey::SpentOutput(hash);
-    db.contains(&key)
+    // Check if the UTXO MMR contains the specified deleted UTXO hash, the backend stxo_db is not used for this task as
+    // archival nodes and pruning nodes might have different STXOs in their stxo_db as horizon state STXOs are
+    // discarded by pruned nodes.
+    if let Some(leaf_index) = db.fetch_mmr_leaf_index(MmrTree::Utxo, &hash)? {
+        let (_, deleted) = db.fetch_mmr_node(MmrTree::Utxo, leaf_index)?;
+        return Ok(deleted);
+    }
+    Ok(false)
 }
 
 fn fetch_mmr_root<T: BlockchainBackend>(db: &T, tree: MmrTree) -> Result<HashOutput, ChainStorageError> {
@@ -664,20 +697,13 @@ fn add_block<T: BlockchainBackend>(
     block_validator: &Arc<Validator<Block, T>>,
     accum_difficulty_validator: &Arc<Validator<Difficulty, T>>,
     block: Block,
-    orphan_storage_capacity: usize,
 ) -> Result<BlockAddResult, ChainStorageError>
 {
     let block_hash = block.hash();
     if db.contains(&DbKey::BlockHash(block_hash))? {
         return Ok(BlockAddResult::BlockExists);
     }
-    let block_add_result = handle_possible_reorg(db, block_validator, accum_difficulty_validator, block)?;
-    // Cleanup orphan block pool
-    match block_add_result {
-        BlockAddResult::Ok | BlockAddResult::BlockExists => {},
-        BlockAddResult::OrphanBlock | BlockAddResult::ChainReorg(_) => cleanup_orphans(db, orphan_storage_capacity)?,
-    }
-    Ok(block_add_result)
+    handle_possible_reorg(db, block_validator, accum_difficulty_validator, block)
 }
 
 // Adds a new block onto the chain tip.
@@ -1323,6 +1349,29 @@ fn cleanup_orphans<T: BlockchainBackend>(
             txn.delete(DbKey::OrphanBlock(block_hash.clone()));
         }
         commit(db, txn)?;
+    }
+    Ok(())
+}
+
+fn cleanup_pruned_mode<T: BlockchainBackend>(
+    db: &mut RwLockWriteGuard<T>,
+    pruned_mode_cleanup_interval: u64,
+    pruning_horizon: u64,
+) -> Result<(), ChainStorageError>
+{
+    let metadata = db.fetch_metadata()?;
+    if metadata.is_pruned_node() {
+        let db_height = metadata.height_of_longest_chain.unwrap_or(0);
+        if db_height % pruned_mode_cleanup_interval == 0 {
+            info!(
+                target: LOG_TARGET,
+                "Pruned mode cleanup interval reached, performing cleanup.",
+            );
+            let max_cp_count = pruning_horizon + 1; // Include accumulated checkpoint
+            let mut txn = DbTransaction::new();
+            txn.merge_checkpoints(max_cp_count as usize);
+            return commit(db, txn);
+        }
     }
     Ok(())
 }
