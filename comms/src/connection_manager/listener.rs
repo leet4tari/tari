@@ -85,7 +85,6 @@ where
         conn_man_notifier: mpsc::Sender<ConnectionManagerEvent>,
         peer_manager: Arc<PeerManager>,
         node_identity: Arc<NodeIdentity>,
-        supported_protocols: Vec<ProtocolId>,
         shutdown_signal: ShutdownSignal,
     ) -> Self
     {
@@ -97,11 +96,17 @@ where
             node_identity,
             shutdown_signal,
             listening_address: None,
-            our_supported_protocols: supported_protocols,
+            our_supported_protocols: Vec::new(),
             bounded_executor: BoundedExecutor::from_current(config.max_simultaneous_inbound_connects),
             liveness_session_count: Arc::new(AtomicUsize::new(config.liveness_max_sessions)),
             config,
         }
+    }
+
+    /// Set the supported protocols of this node to send to peers during the peer identity exchange
+    pub fn set_supported_protocols(&mut self, our_supported_protocols: Vec<ProtocolId>) -> &mut Self {
+        self.our_supported_protocols = our_supported_protocols;
+        self
     }
 
     pub async fn run(mut self) {
@@ -160,9 +165,9 @@ where
         }
     }
 
-    fn is_address_in_liveness_cidr_range(addr: &Multiaddr, whitelist: &[cidr::AnyIpCidr]) -> bool {
+    fn is_address_in_liveness_cidr_range(addr: &Multiaddr, allowlist: &[cidr::AnyIpCidr]) -> bool {
         match multiaddr_to_socketaddr(addr) {
-            Ok(socket_addr) => whitelist.iter().any(|cidr| cidr.contains(&socket_addr.ip())),
+            Ok(socket_addr) => allowlist.iter().any(|cidr| cidr.contains(&socket_addr.ip())),
             Err(_) => {
                 warn!(
                     target: LOG_TARGET,
@@ -182,7 +187,7 @@ where
         permit.fetch_sub(1, Ordering::SeqCst);
         let liveness = LivenessSession::new(socket);
         debug!(target: LOG_TARGET, "Started liveness session");
-        runtime::current_executor().spawn(async move {
+        runtime::current().spawn(async move {
             future::select(liveness.run(), shutdown_signal).await;
             permit.fetch_add(1, Ordering::SeqCst);
         });
@@ -244,7 +249,7 @@ where
                 },
                 Some(WireMode::Liveness) => {
                     if liveness_session_count.load(Ordering::SeqCst) > 0 &&
-                        Self::is_address_in_liveness_cidr_range(&peer_addr, &config.liveness_cidr_whitelist)
+                        Self::is_address_in_liveness_cidr_range(&peer_addr, &config.liveness_cidr_allowlist)
                     {
                         debug!(
                             target: LOG_TARGET,

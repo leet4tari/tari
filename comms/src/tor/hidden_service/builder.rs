@@ -33,18 +33,19 @@ use crate::{
     },
 };
 use bitflags::bitflags;
-use derive_error::Error;
 use log::*;
+use thiserror::Error;
 
 const LOG_TARGET: &str = "comms::tor::hidden_service";
 
 #[derive(Debug, Error)]
 pub enum HiddenServiceBuilderError {
-    /// The proxied port mapping was not provided. Use `with_proxied_port_mapping` to set it.
+    #[error("The proxied port mapping was not provided. Use `with_proxied_port_mapping` to set it.")]
     ProxiedPortMappingNotProvided,
-    /// The control server address was not provided. Use `with_control_server_address` to set it.
+    #[error("The control server address was not provided. Use `with_control_server_address` to set it.")]
     TorControlServerAddressNotProvided,
-    HiddenServiceControllerError(HiddenServiceControllerError),
+    #[error("HiddenServiceControllerError: {0}")]
+    HiddenServiceControllerError(#[from] HiddenServiceControllerError),
 }
 
 bitflags! {
@@ -76,20 +77,22 @@ impl HiddenServiceBuilder {
 }
 
 impl HiddenServiceBuilder {
-    /// The address of the Tor Control Port. An error will result if this is not provided.
+    #[doc("The address of the Tor Control Port. An error will result if this is not provided.")]
     setter!(with_control_server_address, control_server_addr, Option<Multiaddr>);
 
-    /// Authentication settings for the Tor Control Port.
+    #[doc("Authentication settings for the Tor Control Port.")]
     setter!(with_control_server_auth, control_server_auth, Authentication);
 
-    /// Authentication to use for the SOCKS5 proxy.
+    #[doc("Authentication to use for the SOCKS5 proxy.")]
     setter!(with_socks_authentication, socks_auth, socks::Authentication);
 
-    /// The identity of the hidden service. When set, this key is used to enable routing from the Tor network to
-    /// this address. If this is not set, a new service will be requested from the Tor Control Port.
+    #[doc(
+        "The identity of the hidden service. When set, this key is used to enable routing from the Tor network to \
+         this address. If this is not set, a new service will be requested from the Tor Control Port."
+    )]
     setter!(with_tor_identity, identity, Option<TorIdentity>);
 
-    /// Configuration flags for the hidden service
+    #[doc("Configuration flags for the hidden service")]
     setter!(with_hs_flags, hs_flags, HsFlags);
 
     /// The address of the SOCKS5 server. If an address is None, the hidden service builder will use the SOCKS

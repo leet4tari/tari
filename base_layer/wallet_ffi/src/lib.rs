@@ -141,6 +141,7 @@ use tari_comms::{
     peer_manager::{NodeIdentity, PeerFeatures},
     socks,
     tor,
+    types::CommsSecretKey,
 };
 use tari_comms_dht::{DbConnectionUrl, DhtConfig};
 use tari_core::transactions::{tari_amount::MicroTari, types::CryptoFactories};
@@ -154,7 +155,11 @@ use tari_wallet::{
     contacts_service::storage::{database::Contact, sqlite_db::ContactsServiceSqliteDatabase},
     error::WalletError,
     output_manager_service::storage::sqlite_db::OutputManagerSqliteDatabase,
-    storage::{connection_manager::run_migration_and_create_sqlite_connection, sqlite_db::WalletSqliteDatabase},
+    storage::{
+        connection_manager::run_migration_and_create_sqlite_connection,
+        database::WalletDatabase,
+        sqlite_db::WalletSqliteDatabase,
+    },
     testnet_utils::{
         broadcast_transaction,
         complete_sent_transaction,
@@ -178,7 +183,7 @@ use tari_wallet::{
             sqlite_db::TransactionServiceSqliteDatabase,
         },
     },
-    util::emoji::EmojiId,
+    util::emoji::{emoji_set, EmojiId},
     wallet::WalletConfig,
 };
 use tokio::runtime::Runtime;
@@ -211,8 +216,13 @@ pub struct TariPendingInboundTransactions(Vec<TariPendingInboundTransaction>);
 
 pub struct TariPendingOutboundTransactions(Vec<TariPendingOutboundTransaction>);
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct ByteVector(Vec<c_uchar>); // declared like this so that it can be exposed to external header
+
+#[derive(Debug, PartialEq)]
+pub struct EmojiSet(Vec<ByteVector>);
+
+pub struct TariSeedWords(Vec<String>);
 
 /// -------------------------------- Strings ------------------------------------------------ ///
 
@@ -707,6 +717,89 @@ pub unsafe extern "C" fn private_key_from_hex(key: *const c_char, error_out: *mu
 }
 
 /// -------------------------------------------------------------------------------------------- ///
+/// ----------------------------------- Seed Words ----------------------------------------------///
+
+/// Gets the length of TariSeedWords
+///
+/// ## Arguments
+/// `seed_words` - The pointer to a TariSeedWords
+/// `error_out` - Pointer to an int which will be modified to an error code should one occur, may not be null. Functions
+/// as an out parameter.
+///
+/// ## Returns
+/// `c_uint` - Returns number of elements in , zero if contacts is null
+///
+/// # Safety
+/// None
+#[no_mangle]
+pub unsafe extern "C" fn seed_words_get_length(seed_words: *const TariSeedWords, error_out: *mut c_int) -> c_uint {
+    let mut error = 0;
+    ptr::swap(error_out, &mut error as *mut c_int);
+    let mut len = 0;
+    if seed_words.is_null() {
+        error = LibWalletError::from(InterfaceError::NullError("seed words".to_string())).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+    } else {
+        len = (*seed_words).0.len();
+    }
+    len as c_uint
+}
+
+/// Gets a seed word from TariSeedWords at position
+///
+/// ## Arguments
+/// `seed_words` - The pointer to a TariSeedWords
+/// `position` - The integer position
+/// `error_out` - Pointer to an int which will be modified to an error code should one occur, may not be null. Functions
+/// as an out parameter.
+///
+/// ## Returns
+/// `*mut c_char` - Returns a pointer to a char array. Note that it returns an empty char array if
+/// TariSeedWords collection is null or the position is invalid
+///
+/// # Safety
+/// The ```string_destroy``` method must be called when finished with a string from rust to prevent a memory leak
+#[no_mangle]
+pub unsafe extern "C" fn seed_words_get_at(
+    seed_words: *mut TariSeedWords,
+    position: c_uint,
+    error_out: *mut c_int,
+) -> *mut c_char
+{
+    let mut error = 0;
+    ptr::swap(error_out, &mut error as *mut c_int);
+    let mut word = CString::new("").unwrap();
+    if seed_words.is_null() {
+        error = LibWalletError::from(InterfaceError::NullError("seed words".to_string())).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+    } else {
+        let len = (*seed_words).0.len();
+        if position > len as u32 {
+            error = LibWalletError::from(InterfaceError::PositionInvalidError).code;
+            ptr::swap(error_out, &mut error as *mut c_int);
+        } else {
+            word = CString::new((*seed_words).0[position as usize].clone()).unwrap()
+        }
+    }
+    CString::into_raw(word)
+}
+
+/// Frees memory for a TariSeedWords
+///
+/// ## Arguments
+/// `seed_words` - The pointer to a TariSeedWords
+///
+/// ## Returns
+/// `()` - Does not return a value, equivalent to void in C
+///
+/// # Safety
+/// None
+#[no_mangle]
+pub unsafe extern "C" fn seed_words_destroy(seed_words: *mut TariSeedWords) {
+    if !seed_words.is_null() {
+        Box::from_raw(seed_words);
+    }
+}
 
 /// ----------------------------------- Contact -------------------------------------------------///
 
@@ -2137,14 +2230,14 @@ pub unsafe extern "C" fn transport_type_destroy(transport: *mut TariTransportTyp
 /// ## Arguments
 /// `public_address` - The public address char array pointer. This is the address that the wallet advertises publicly to
 /// peers
-/// `listener_address` - The listener address char array pointer. This is the address that inbound peer
+/// `transport_type` - TariTransportType that specifies the type of comms transport to be used.
 /// connections are moved to after initial connection. Default if null is 0.0.0.0:7898 which will accept connections
 /// from all IP address on port 7898
 /// `database_name` - The database name char array pointer. This is the unique name of this
-/// wallet's database `database_path` - The database path char array pointer which. This is the folder path where the
+/// wallet's database
+/// `database_path` - The database path char array pointer which. This is the folder path where the
 /// database files will be created and the application has write access to
-/// `secret_key` - The TariSecretKey pointer. This is the secret key corresponding to the Public key that represents
-/// this node on the Tari comms network
+/// `discovery_timeout_in_secs`: specify how long the Discovery Timeout for the wallet is.
 /// `error_out` - Pointer to an int which will be modified to an error code should one occur, may not be null. Functions
 /// as an out parameter.
 ///
@@ -2160,7 +2253,6 @@ pub unsafe extern "C" fn comms_config_create(
     transport_type: *const TariTransportType,
     database_name: *const c_char,
     datastore_path: *const c_char,
-    secret_key: *mut TariPrivateKey,
     discovery_timeout_in_secs: c_ulonglong,
     error_out: *mut c_int,
 ) -> *mut TariCommsConfig
@@ -2196,15 +2288,49 @@ pub unsafe extern "C" fn comms_config_create(
     let datastore_path = PathBuf::from(datastore_path_string);
 
     let dht_database_path = datastore_path.join("dht.db");
+
+    // Check to see if we have a comms private key stored in the Sqlite database. If not generate a new one.
+    let sql_database_path = datastore_path
+        .join(database_name_string.clone())
+        .with_extension("sqlite3");
+    let connection = run_migration_and_create_sqlite_connection(&sql_database_path)
+        .map_err(|e| {
+            error!(
+                target: LOG_TARGET,
+                "Error creating Sqlite Connection in Wallet: {:?}", e
+            );
+            e
+        })
+        .expect("Could not open Sqlite db");
+    let wallet_backend = WalletDatabase::new(WalletSqliteDatabase::new(connection));
+
+    let comms_secret_key = match Runtime::new() {
+        Ok(mut rt) => {
+            let secret_key = match rt.block_on(wallet_backend.get_comms_secret_key()) {
+                Ok(sk) => sk,
+                Err(e) => {
+                    error = LibWalletError::from(WalletError::WalletStorageError(e)).code;
+                    ptr::swap(error_out, &mut error as *mut c_int);
+                    return ptr::null_mut();
+                },
+            };
+            match secret_key {
+                None => CommsSecretKey::random(&mut OsRng),
+                Some(sk) => sk,
+            }
+        },
+        Err(e) => {
+            error = LibWalletError::from(InterfaceError::TokioError(e.to_string())).code;
+            ptr::swap(error_out, &mut error as *mut c_int);
+            return ptr::null_mut();
+        },
+    };
+
     let public_address = public_address_str.parse::<Multiaddr>();
 
     match public_address {
         Ok(public_address) => {
-            let ni = NodeIdentity::new(
-                (*secret_key).clone(),
-                public_address,
-                PeerFeatures::COMMUNICATION_CLIENT,
-            );
+            let ni = NodeIdentity::new(comms_secret_key, public_address, PeerFeatures::COMMUNICATION_CLIENT);
             match ni {
                 Ok(ni) => {
                     let config = TariCommsConfig {
@@ -2217,12 +2343,13 @@ pub unsafe extern "C" fn comms_config_create(
                         dht: DhtConfig {
                             discovery_request_timeout: Duration::from_secs(discovery_timeout_in_secs),
                             database_url: DbConnectionUrl::File(dht_database_path),
+                            auto_join: true,
                             ..Default::default()
                         },
                         // TODO: This should be set to false for non-test wallets. See the `allow_test_addresses` field
                         //       docstring for more info.
                         allow_test_addresses: true,
-                        listener_liveness_whitelist_cidrs: Vec::new(),
+                        listener_liveness_allowlist_cidrs: Vec::new(),
                         listener_liveness_max_sessions: 0,
                     };
 
@@ -2239,6 +2366,58 @@ pub unsafe extern "C" fn comms_config_create(
             error = LibWalletError::from(e).code;
             ptr::swap(error_out, &mut error as *mut c_int);
             ptr::null_mut()
+        },
+    }
+}
+
+/// Set the Comms Secret Key for an existing TariCommsConfig. Usually this key is maintained by the backend but if it is
+/// required to set a specific new one this function can be used.
+///
+/// ## Arguments
+/// `comms_config` - TariCommsConfig to be updated
+/// `secret_key` - The TariSecretKey pointer. This is the secret key corresponding to the Public key that represents
+/// this node on the Tari comms network
+/// `error_out` - Pointer to an int which will be modified to an error code should one occur, may not be null. Functions
+/// as an out parameter.
+///
+/// ## Returns
+/// None
+///
+/// # Safety
+/// None
+#[no_mangle]
+pub unsafe extern "C" fn comms_config_set_secret_key(
+    comms_config: *mut TariCommsConfig,
+    secret_key: *const TariPrivateKey,
+    error_out: *mut c_int,
+)
+{
+    let mut error = 0;
+    ptr::swap(error_out, &mut error as *mut c_int);
+
+    if comms_config.is_null() {
+        error = LibWalletError::from(InterfaceError::NullError("comms_config".to_string())).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+        return;
+    }
+
+    if secret_key.is_null() {
+        error = LibWalletError::from(InterfaceError::NullError("secret_key".to_string())).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+        return;
+    }
+
+    match NodeIdentity::new(
+        (*secret_key).clone(),
+        (*comms_config).node_identity.public_address(),
+        PeerFeatures::COMMUNICATION_CLIENT,
+    ) {
+        Ok(ni) => {
+            (*comms_config).node_identity = Arc::new(ni);
+        },
+        Err(e) => {
+            error = LibWalletError::from(e).code;
+            ptr::swap(error_out, &mut error as *mut c_int);
         },
     }
 }
@@ -2370,25 +2549,26 @@ pub unsafe extern "C" fn wallet_create(
                     comms_config: (*config).clone(),
                     factories,
                     transaction_service_config: Some(TransactionServiceConfig {
-                        direct_send_timeout: (*config).dht.discovery_request_timeout.clone(),
+                        direct_send_timeout: (*config).dht.discovery_request_timeout,
                         ..Default::default()
                     }),
                 },
                 runtime,
-                wallet_backend,
+                wallet_backend.clone(),
                 transaction_backend.clone(),
                 output_manager_backend,
                 contacts_backend,
             );
 
             match w {
-                Ok(w) => {
+                Ok(mut w) => {
                     // Start Callback Handler
                     let callback_handler = CallbackHandler::new(
                         TransactionDatabase::new(transaction_backend),
                         w.transaction_service.get_event_stream_fused(),
                         w.output_manager_service.get_event_stream_fused(),
                         w.comms.shutdown_signal(),
+                        w.comms.node_identity().public_key().clone(),
                         callback_received_transaction,
                         callback_received_transaction_reply,
                         callback_received_finalized_transaction,
@@ -2401,6 +2581,18 @@ pub unsafe extern "C" fn wallet_create(
                     );
 
                     w.runtime.spawn(callback_handler.start());
+
+                    // Persist the Comms Private Key provided to this function
+                    let wallet_db = WalletDatabase::new(wallet_backend);
+                    if let Err(e) = w
+                        .runtime
+                        .block_on(wallet_db.set_comms_private_key((*config).node_identity.secret_key().clone()))
+                    {
+                        error!(
+                            target: LOG_TARGET,
+                            "Unable to store Comms Secret Key in Wallet Backend DB: {:?}", e
+                        );
+                    }
 
                     Box::into_raw(Box::new(w))
                 },
@@ -4013,6 +4205,197 @@ pub unsafe extern "C" fn wallet_coin_split(
     }
 }
 
+/// Gets the seed words representing the seed private key of the provided `TariWallet`.
+///
+/// ## Arguments
+/// `wallet` - The TariWallet pointer
+/// `error_out` - Pointer to an int which will be modified to an error code should one occur, may not be null. Functions
+/// as an out parameter.
+///
+/// ## Returns
+/// `*mut TariSeedWords` - A collection of the seed words
+///
+/// # Safety
+/// The ```tari_seed_words_destroy``` method must be called when finished with a
+/// TariSeedWords to prevent a memory leak
+#[no_mangle]
+pub unsafe extern "C" fn wallet_get_seed_words(wallet: *mut TariWallet, error_out: *mut c_int) -> *mut TariSeedWords {
+    let mut error = 0;
+    ptr::swap(error_out, &mut error as *mut c_int);
+    if wallet.is_null() {
+        error = LibWalletError::from(InterfaceError::NullError("wallet".to_string())).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+        return ptr::null_mut();
+    }
+
+    match (*wallet)
+        .runtime
+        .block_on((*wallet).output_manager_service.get_seed_words())
+    {
+        Ok(sw) => Box::into_raw(Box::new(TariSeedWords(sw))),
+        Err(e) => {
+            error = LibWalletError::from(WalletError::OutputManagerError(e)).code;
+            ptr::swap(error_out, &mut error as *mut c_int);
+            ptr::null_mut()
+        },
+    }
+}
+
+/// Set the power mode of the wallet to Low Power mode which will reduce the amount of network operations the wallet
+/// performs to conserve power
+///
+/// ## Arguments
+/// `wallet` - The TariWallet pointer
+/// `error_out` - Pointer to an int which will be modified to an error code should one occur, may not be null. Functions
+/// as an out parameter.
+/// # Safety
+/// None
+#[no_mangle]
+pub unsafe extern "C" fn wallet_set_low_power_mode(wallet: *mut TariWallet, error_out: *mut c_int) {
+    let mut error = 0;
+    ptr::swap(error_out, &mut error as *mut c_int);
+    if wallet.is_null() {
+        error = LibWalletError::from(InterfaceError::NullError("wallet".to_string())).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+        return;
+    }
+
+    if let Err(e) = (*wallet)
+        .runtime
+        .block_on((*wallet).transaction_service.set_low_power_mode())
+    {
+        error = LibWalletError::from(WalletError::TransactionServiceError(e)).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+    }
+}
+
+/// Set the power mode of the wallet to Normal Power mode which will then use the standard level of network traffic
+///
+/// ## Arguments
+/// `wallet` - The TariWallet pointer
+/// `error_out` - Pointer to an int which will be modified to an error code should one occur, may not be null. Functions
+/// as an out parameter.
+/// # Safety
+/// None
+#[no_mangle]
+pub unsafe extern "C" fn wallet_set_normal_power_mode(wallet: *mut TariWallet, error_out: *mut c_int) {
+    let mut error = 0;
+    ptr::swap(error_out, &mut error as *mut c_int);
+    if wallet.is_null() {
+        error = LibWalletError::from(InterfaceError::NullError("wallet".to_string())).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+        return;
+    }
+
+    if let Err(e) = (*wallet)
+        .runtime
+        .block_on((*wallet).transaction_service.set_normal_power_mode())
+    {
+        error = LibWalletError::from(WalletError::TransactionServiceError(e)).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+    }
+}
+
+/// Gets the current emoji set
+///
+/// ## Arguments
+/// `()` - Does not take any arguments
+///
+/// ## Returns
+/// `*mut EmojiSet` - Pointer to the created EmojiSet.
+///
+/// # Safety
+/// The ```emoji_set_destroy``` function must be called when finished with a ByteVector to prevent a memory leak
+#[no_mangle]
+pub unsafe extern "C" fn get_emoji_set() -> *mut EmojiSet {
+    let current_emoji_set = emoji_set();
+    let mut emoji_set: Vec<ByteVector> = Vec::with_capacity(current_emoji_set.len());
+    for emoji in current_emoji_set.iter() {
+        let mut b = [0; 4]; // emojis are 4 bytes, unicode character
+        let emoji_char = ByteVector(emoji.encode_utf8(&mut b).as_bytes().to_vec());
+        emoji_set.push(emoji_char);
+    }
+    let result = EmojiSet(emoji_set);
+    Box::into_raw(Box::new(result))
+}
+
+/// Gets the length of the current emoji set
+///
+/// ## Arguments
+/// `*mut EmojiSet` - Pointer to emoji set
+///
+/// ## Returns
+/// `c_int` - Pointer to the created EmojiSet.
+///
+/// # Safety
+/// None
+#[no_mangle]
+pub unsafe extern "C" fn emoji_set_get_length(emoji_set: *const EmojiSet, error_out: *mut c_int) -> c_uint {
+    let mut error = 0;
+    ptr::swap(error_out, &mut error as *mut c_int);
+    if emoji_set.is_null() {
+        error = LibWalletError::from(InterfaceError::NullError("emoji_set".to_string())).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+        return 0;
+    }
+    (*emoji_set).0.len() as c_uint
+}
+
+/// Gets a ByteVector at position in a EmojiSet
+///
+/// ## Arguments
+/// `emoji_set` - The pointer to a EmojiSet
+/// `position` - The integer position
+/// `error_out` - Pointer to an int which will be modified to an error code should one occur, may not be null. Functions
+/// as an out parameter.
+///
+/// ## Returns
+/// `ByteVector` - Returns a ByteVector. Note that the ByteVector will be null if ptr
+/// is null or if the position is invalid
+///
+/// # Safety
+/// The ```byte_vector_destroy``` function must be called when finished with the ByteVector to prevent a memory leak.
+#[no_mangle]
+pub unsafe extern "C" fn emoji_set_get_at(
+    emoji_set: *const EmojiSet,
+    position: c_uint,
+    error_out: *mut c_int,
+) -> *mut ByteVector
+{
+    let mut error = 0;
+    ptr::swap(error_out, &mut error as *mut c_int);
+    if emoji_set.is_null() {
+        error = LibWalletError::from(InterfaceError::NullError("emoji_set".to_string())).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+        return ptr::null_mut();
+    }
+    let last_index = emoji_set_get_length(emoji_set, error_out) - 1;
+    if position > last_index {
+        error = LibWalletError::from(InterfaceError::PositionInvalidError).code;
+        ptr::swap(error_out, &mut error as *mut c_int);
+        return ptr::null_mut();
+    }
+    let result = (*emoji_set).0[position as usize].clone();
+    Box::into_raw(Box::new(result))
+}
+
+/// Frees memory for a EmojiSet
+///
+/// ## Arguments
+/// `emoji_set` - The EmojiSet pointer
+///
+/// ## Returns
+/// `()` - Does not return a value, equivalent to void in C
+///
+/// # Safety
+/// None
+#[no_mangle]
+pub unsafe extern "C" fn emoji_set_destroy(emoji_set: *mut EmojiSet) {
+    if !emoji_set.is_null() {
+        Box::from_raw(emoji_set);
+    }
+}
+
 /// Frees memory for a TariWallet
 ///
 /// ## Arguments
@@ -4053,9 +4436,21 @@ mod test {
 
     use crate::*;
     use libc::{c_char, c_uchar, c_uint};
-    use std::{ffi::CString, sync::Mutex, thread};
-    use tari_core::transactions::tari_amount::uT;
-    use tari_wallet::{testnet_utils::random_string, transaction_service::storage::database::TransactionStatus};
+    use std::{
+        ffi::CString,
+        path::Path,
+        str::{from_utf8, FromStr},
+        sync::Mutex,
+        thread,
+    };
+    use tari_comms::types::CommsPublicKey;
+    use tari_core::transactions::{tari_amount::uT, types::PrivateKey};
+    use tari_key_manager::mnemonic::Mnemonic;
+    use tari_wallet::{
+        testnet_utils::random_string,
+        transaction_service::storage::database::TransactionStatus,
+        util::emoji,
+    };
     use tempdir::TempDir;
 
     fn type_of<T>(_: T) -> String {
@@ -4303,6 +4698,35 @@ mod test {
     }
 
     #[test]
+    fn test_emoji_set() {
+        unsafe {
+            let emoji_set = get_emoji_set();
+            let compare_emoji_set = emoji::emoji_set();
+            let mut error = 0;
+            let error_ptr = &mut error as *mut c_int;
+            let len = emoji_set_get_length(emoji_set, error_ptr);
+            assert_eq!(error, 0);
+            for i in 0..len {
+                let emoji_byte_vector = emoji_set_get_at(emoji_set, i as c_uint, error_ptr);
+                assert_eq!(error, 0);
+                let emoji_byte_vector_length = byte_vector_get_length(emoji_byte_vector, error_ptr);
+                assert_eq!(error, 0);
+                let mut emoji_bytes = Vec::new();
+                for c in 0..emoji_byte_vector_length {
+                    let byte = byte_vector_get_at(emoji_byte_vector, c as c_uint, error_ptr);
+                    assert_eq!(error, 0);
+                    emoji_bytes.push(byte);
+                }
+                let emoji = char::from_str(from_utf8(emoji_bytes.as_slice()).unwrap()).unwrap();
+                let compare = compare_emoji_set[i as usize] == emoji;
+                byte_vector_destroy(emoji_byte_vector);
+                assert_eq!(compare, true);
+            }
+            emoji_set_destroy(emoji_set);
+        }
+    }
+
+    #[test]
     fn test_transport_type_memory() {
         unsafe {
             let mut error = 0;
@@ -4522,11 +4946,10 @@ mod test {
                 transport_type_alice,
                 db_name_alice_str,
                 db_path_alice_str,
-                secret_key_alice,
                 20,
                 error_ptr,
             );
-
+            comms_config_set_secret_key(alice_config, secret_key_alice, error_ptr);
             let alice_wallet = wallet_create(
                 alice_config,
                 ptr::null(),
@@ -4557,10 +4980,10 @@ mod test {
                 transport_type_bob,
                 db_name_bob_str,
                 db_path_bob_str,
-                secret_key_bob,
                 20,
                 error_ptr,
             );
+            comms_config_set_secret_key(bob_config, secret_key_bob, error_ptr);
             let bob_wallet = wallet_create(
                 bob_config,
                 ptr::null(),
@@ -4894,6 +5317,24 @@ mod test {
             assert_eq!(split_tx.is_ok(), true);
             string_destroy(split_msg_str as *mut c_char);
 
+            wallet_set_low_power_mode(alice_wallet, error_ptr);
+            assert_eq!((*error_ptr), 0);
+            wallet_set_normal_power_mode(alice_wallet, error_ptr);
+            assert_eq!((*error_ptr), 0);
+
+            // Test seed words
+            let seed_words = wallet_get_seed_words(alice_wallet, error_ptr);
+            let seed_word_len = seed_words_get_length(seed_words, error_ptr);
+
+            let mut seed_words_vec = Vec::new();
+            for i in 0..seed_word_len {
+                let word = seed_words_get_at(seed_words, i as c_uint, error_ptr);
+                let word_string = CString::from_raw(word).to_str().unwrap().to_owned();
+                seed_words_vec.push(word_string);
+            }
+            let _seed_word_private_key = PrivateKey::from_mnemonic(&seed_words_vec)
+                .expect("Seed words should be able to convert to private key");
+
             let lock = CALLBACK_STATE_FFI.lock().unwrap();
             assert!(lock.received_tx_callback_called);
             assert!(lock.received_tx_reply_callback_called);
@@ -4924,6 +5365,111 @@ mod test {
             comms_config_destroy(alice_config);
             transport_type_destroy(transport_type_alice);
             transport_type_destroy(transport_type_bob);
+            seed_words_destroy(seed_words);
+        }
+    }
+
+    #[test]
+    fn test_comms_private_key_persistence() {
+        let _ = env_logger::try_init();
+        unsafe {
+            let mut error = 0;
+            let error_ptr = &mut error as *mut c_int;
+
+            let secret_key_alice = private_key_generate();
+            let public_key_alice = public_key_from_private_key(secret_key_alice.clone(), error_ptr);
+            let db_name = random_string(8);
+            let db_name_alice = CString::new(db_name.as_str()).unwrap();
+            let db_name_alice_str: *const c_char = CString::into_raw(db_name_alice.clone()) as *const c_char;
+            let alice_temp_dir = TempDir::new(random_string(8).as_str()).unwrap();
+            let db_path_alice = CString::new(alice_temp_dir.path().to_str().unwrap()).unwrap();
+            let db_path_alice_str: *const c_char = CString::into_raw(db_path_alice.clone()) as *const c_char;
+            let transport_type_alice = transport_memory_create();
+            let address_alice = transport_memory_get_address(transport_type_alice, error_ptr);
+            let address_alice_str = CStr::from_ptr(address_alice).to_str().unwrap().to_owned();
+            let address_alice_str: *const c_char = CString::new(address_alice_str).unwrap().into_raw() as *const c_char;
+
+            let sql_database_path = Path::new(alice_temp_dir.path().to_str().unwrap())
+                .join(db_name)
+                .with_extension("sqlite3");
+            let connection =
+                run_migration_and_create_sqlite_connection(&sql_database_path).expect("Could not open Sqlite db");
+            let wallet_backend = WalletDatabase::new(WalletSqliteDatabase::new(connection.clone()));
+
+            let alice_config = comms_config_create(
+                address_alice_str,
+                transport_type_alice,
+                db_name_alice_str,
+                db_path_alice_str,
+                20,
+                error_ptr,
+            );
+
+            let mut runtime = Runtime::new().unwrap();
+            let stored_key = runtime.block_on(wallet_backend.get_comms_secret_key()).unwrap();
+
+            assert!(stored_key.is_none(), "No key should be stored yet");
+            let generated_public_key1 = (*alice_config).node_identity.public_key().clone();
+
+            comms_config_set_secret_key(alice_config, secret_key_alice, error_ptr);
+            assert_eq!(*error_ptr, 0, "No error expected");
+
+            assert_eq!(&(*public_key_alice), (*alice_config).node_identity.public_key());
+
+            let alice_config2 = comms_config_create(
+                address_alice_str,
+                transport_type_alice,
+                db_name_alice_str,
+                db_path_alice_str,
+                20,
+                error_ptr,
+            );
+            assert_ne!(&generated_public_key1, (*alice_config2).node_identity.public_key());
+
+            let alice_wallet = wallet_create(
+                alice_config,
+                ptr::null(),
+                received_tx_callback,
+                received_tx_reply_callback,
+                received_tx_finalized_callback,
+                broadcast_callback,
+                mined_callback,
+                direct_send_callback,
+                store_and_forward_send_callback,
+                tx_cancellation_callback,
+                base_node_sync_process_complete_callback,
+                error_ptr,
+            );
+
+            let stored_key = (*alice_wallet)
+                .runtime
+                .block_on(wallet_backend.get_comms_secret_key())
+                .unwrap()
+                .unwrap();
+            let public_stored_key = CommsPublicKey::from_secret_key(&stored_key);
+            assert_eq!(public_stored_key, (*public_key_alice));
+
+            wallet_destroy(alice_wallet);
+
+            let alice_config3 = comms_config_create(
+                address_alice_str,
+                transport_type_alice,
+                db_name_alice_str,
+                db_path_alice_str,
+                20,
+                error_ptr,
+            );
+            assert_eq!((*alice_config3).node_identity.public_key(), &(*public_key_alice));
+
+            string_destroy(db_name_alice_str as *mut c_char);
+            string_destroy(db_path_alice_str as *mut c_char);
+            string_destroy(address_alice_str as *mut c_char);
+            private_key_destroy(secret_key_alice);
+            public_key_destroy(public_key_alice);
+            transport_type_destroy(transport_type_alice);
+            comms_config_destroy(alice_config);
+            comms_config_destroy(alice_config2);
+            comms_config_destroy(alice_config3);
         }
     }
 }

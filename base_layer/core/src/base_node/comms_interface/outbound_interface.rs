@@ -22,7 +22,7 @@
 
 use crate::{
     base_node::comms_interface::{error::CommsInterfaceError, NodeCommsRequest, NodeCommsResponse},
-    blocks::{blockheader::BlockHeader, Block},
+    blocks::{blockheader::BlockHeader, NewBlock},
     chain_storage::{ChainMetadata, HistoricalBlock, MmrTree},
     transactions::{
         transaction::{TransactionKernel, TransactionOutput},
@@ -41,7 +41,7 @@ pub const LOG_TARGET: &str = "c::bn::comms_interface::outbound_interface";
 #[derive(Clone)]
 pub struct OutboundNodeCommsInterface {
     request_sender: SenderService<(NodeCommsRequest, Option<NodeId>), Result<NodeCommsResponse, CommsInterfaceError>>,
-    block_sender: UnboundedSender<(Block, Vec<NodeId>)>,
+    block_sender: UnboundedSender<(NewBlock, Vec<NodeId>)>,
 }
 
 impl OutboundNodeCommsInterface {
@@ -51,7 +51,7 @@ impl OutboundNodeCommsInterface {
             (NodeCommsRequest, Option<NodeId>),
             Result<NodeCommsResponse, CommsInterfaceError>,
         >,
-        block_sender: UnboundedSender<(Block, Vec<NodeId>)>,
+        block_sender: UnboundedSender<(NewBlock, Vec<NodeId>)>,
     ) -> Self
     {
         Self {
@@ -213,6 +213,30 @@ impl OutboundNodeCommsInterface {
         }
     }
 
+    /// Fetch the UTXOs or STXOs with the provided hashes from remote base nodes.
+    pub async fn fetch_txos(&mut self, hashes: Vec<HashOutput>) -> Result<Vec<TransactionOutput>, CommsInterfaceError> {
+        self.request_txos_from_peer(hashes, None).await
+    }
+
+    /// Fetch the UTXOs or STXOS with the provided hashes from a specific base node, if None is provided as a node_id
+    /// then a random base node will be queried.
+    pub async fn request_txos_from_peer(
+        &mut self,
+        hashes: Vec<HashOutput>,
+        node_id: Option<NodeId>,
+    ) -> Result<Vec<TransactionOutput>, CommsInterfaceError>
+    {
+        if let NodeCommsResponse::TransactionOutputs(txos) = self
+            .request_sender
+            .call((NodeCommsRequest::FetchTxos(hashes), node_id))
+            .await??
+        {
+            Ok(txos)
+        } else {
+            Err(CommsInterfaceError::UnexpectedApiResponse)
+        }
+    }
+
     /// Fetch the Historical Blocks corresponding to the provided block numbers from remote base nodes.
     pub async fn fetch_blocks(&mut self, block_nums: Vec<u64>) -> Result<Vec<HistoricalBlock>, CommsInterfaceError> {
         self.request_blocks_from_peer(block_nums, None).await
@@ -268,13 +292,13 @@ impl OutboundNodeCommsInterface {
 
     /// Transmit a block to remote base nodes, excluding the provided peers.
     pub async fn propagate_block(
-        &mut self,
-        block: Block,
+        &self,
+        new_block: NewBlock,
         exclude_peers: Vec<NodeId>,
     ) -> Result<(), CommsInterfaceError>
     {
         self.block_sender
-            .unbounded_send((block, exclude_peers))
+            .unbounded_send((new_block, exclude_peers))
             .map_err(|_| CommsInterfaceError::BroadcastFailed)
     }
 
@@ -304,12 +328,13 @@ impl OutboundNodeCommsInterface {
         tree: MmrTree,
         pos: u32,
         count: u32,
+        hist_height: u64,
         node_id: Option<NodeId>,
     ) -> Result<(Vec<HashOutput>, Vec<u8>), CommsInterfaceError>
     {
         if let NodeCommsResponse::MmrNodes(added, deleted) = self
             .request_sender
-            .call((NodeCommsRequest::FetchMmrNodes(tree, pos, count), node_id))
+            .call((NodeCommsRequest::FetchMmrNodes(tree, pos, count, hist_height), node_id))
             .await??
         {
             Ok((added, deleted))

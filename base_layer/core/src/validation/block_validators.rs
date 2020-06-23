@@ -27,7 +27,7 @@ use crate::{
         BlockValidationError,
         NewBlockTemplate,
     },
-    chain_storage::{calculate_mmr_roots, is_utxo, BlockchainBackend},
+    chain_storage::{calculate_mmr_roots, is_stxo, is_utxo, BlockchainBackend},
     consensus::{ConsensusConstants, ConsensusManager},
     transactions::{transaction::OutputFlags, types::CryptoFactories},
     validation::{
@@ -80,13 +80,12 @@ impl StatelessValidation<Block> for StatelessBlockValidator {
         trace!(target: LOG_TARGET, "SV - Output constraints are ok for {} ", &block_id);
         check_cut_through(block)?;
         trace!(target: LOG_TARGET, "SV - Cut-through is ok for {} ", &block_id);
+        check_accounting_balance(block, self.rules.clone(), &self.factories)?;
+        trace!(target: LOG_TARGET, "SV - accounting balance correct for {}", &block_id);
         debug!(
             target: LOG_TARGET,
             "{} has PASSED stateless VALIDATION check.", &block_id
         );
-
-        check_accounting_balance(block, self.rules.clone(), &self.factories)?;
-        trace!(target: LOG_TARGET, "SV - accounting balance correct for {}", &block_id);
         Ok(())
     }
 }
@@ -108,6 +107,7 @@ impl<B: BlockchainBackend> Validation<Block, B> for FullConsensusValidator {
     /// The consensus checks that are done (in order of cheapest to verify to most expensive):
     /// 1. Does the block satisfy the stateless checks?
     /// 1. Are all inputs currently in the UTXO set?
+    /// 1. Are all inputs and outputs not in the STXO set?
     /// 1. Are the block header MMR roots valid?
     /// 1. Is the block header timestamp less than the ftl?
     /// 1. Is the block header timestamp greater than the median timestamp?
@@ -116,9 +116,10 @@ impl<B: BlockchainBackend> Validation<Block, B> for FullConsensusValidator {
     fn validate(&self, block: &Block, db: &B) -> Result<(), ValidationError> {
         let block_id = format!("block #{} ({})", block.header.height, block.hash().to_hex());
         check_inputs_are_utxos(block, db)?;
+        check_not_stxos(block, db)?;
         trace!(
             target: LOG_TARGET,
-            "Block validation: All inputs are valid for {}",
+            "Block validation: All inputs and outputs are valid for {}",
             &block_id
         );
         check_mmr_roots(block, db)?;
@@ -259,14 +260,40 @@ fn check_duplicate_transactions_inputs(block: &Block) -> Result<(), ValidationEr
 /// This function checks that all inputs in the blocks are valid UTXO's to be spend
 fn check_inputs_are_utxos<B: BlockchainBackend>(block: &Block, db: &B) -> Result<(), ValidationError> {
     for utxo in block.body.inputs() {
-        if !(utxo.features.flags.contains(OutputFlags::COINBASE_OUTPUT)) &&
-            !(is_utxo(db, utxo.hash())).map_err(|e| ValidationError::CustomError(e.to_string()))?
-        {
+        if utxo.features.flags.contains(OutputFlags::COINBASE_OUTPUT) {
+            continue;
+        }
+
+        if !is_utxo(db, utxo.hash()).map_err(ValidationError::custom_error)? {
             warn!(
                 target: LOG_TARGET,
                 "Block validation failed because the block has invalid input: {}", utxo
             );
             return Err(ValidationError::BlockError(BlockValidationError::InvalidInput));
+        }
+    }
+    Ok(())
+}
+
+// This function checks that the inputs and outputs do not exist in the STxO set.
+fn check_not_stxos<B: BlockchainBackend>(block: &Block, db: &B) -> Result<(), ValidationError> {
+    for input in block.body.inputs() {
+        if is_stxo(db, input.hash()).map_err(ValidationError::custom_error)? {
+            // we dont want to log this as a node or wallet might retransmit a transaction
+            debug!(
+                target: LOG_TARGET,
+                "Block validation failed due to already spent input: {}", input
+            );
+            return Err(ValidationError::ContainsSTxO);
+        }
+    }
+    for output in block.body.outputs() {
+        if is_stxo(db, output.hash()).map_err(|e| ValidationError::CustomError(e.to_string()))? {
+            debug!(
+                target: LOG_TARGET,
+                "Block validation failed due to previously spent output: {}", output
+            );
+            return Err(ValidationError::ContainsSTxO);
         }
     }
     Ok(())

@@ -36,7 +36,7 @@ use helpers::{
     sample_blockchains::create_new_blockchain,
 };
 use std::{ops::Deref, sync::Arc, time::Duration};
-use tari_comms_dht::{domain_message::OutboundDomainMessage, outbound::OutboundEncryption};
+use tari_comms_dht::domain_message::OutboundDomainMessage;
 use tari_core::{
     base_node::{comms_interface::Broadcast, service::BaseNodeServiceConfig},
     consensus::{ConsensusConstantsBuilder, ConsensusManagerBuilder, Network},
@@ -492,7 +492,7 @@ fn request_response_get_stats() {
         MempoolServiceConfig::default(),
         LivenessConfig::default(),
         consensus_manager,
-        temp_dir.path().to_str().unwrap(),
+        temp_dir.path(),
     );
 
     // Create a tx spending the genesis output. Then create 2 orphan txs
@@ -642,7 +642,6 @@ fn receive_and_propagate_transaction() {
             .outbound_message_service
             .send_direct(
                 bob_node.node_identity.public_key().clone(),
-                OutboundEncryption::None,
                 OutboundDomainMessage::new(TariMessageType::NewTransaction, proto::types::Transaction::from(tx)),
             )
             .await
@@ -651,7 +650,6 @@ fn receive_and_propagate_transaction() {
             .outbound_message_service
             .send_direct(
                 carol_node.node_identity.public_key().clone(),
-                OutboundEncryption::None,
                 OutboundDomainMessage::new(TariMessageType::NewTransaction, proto::types::Transaction::from(orphan)),
             )
             .await

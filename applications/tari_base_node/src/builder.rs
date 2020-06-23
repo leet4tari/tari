@@ -483,6 +483,7 @@ where
     let db_config = BlockchainDatabaseConfig {
         orphan_storage_capacity: config.orphan_storage_capacity,
         pruning_horizon: config.pruning_horizon,
+        pruned_mode_cleanup_interval: config.pruned_mode_cleanup_interval,
     };
     let db = BlockchainDatabase::new(backend, &rules, validators, db_config).map_err(|e| e.to_string())?;
     let mempool_validator =
@@ -496,6 +497,11 @@ where
     let base_node_subscriptions = Arc::new(base_node_subscriptions);
     create_peer_db_folder(&config.peer_db_path)?;
     let (base_node_comms, base_node_dht) = setup_base_node_comms(base_node_identity, config, publisher).await?;
+    base_node_comms
+        .connectivity()
+        .add_managed_peers(vec![wallet_node_identity.node_id().clone()])
+        .await
+        .map_err(|err| err.to_string())?;
 
     debug!(target: LOG_TARGET, "Registering base node services");
     let base_node_handles = register_base_node_services(
@@ -510,7 +516,7 @@ where
     debug!(target: LOG_TARGET, "Base node service registration complete.");
 
     //---------------------------------- Wallet --------------------------------------------//
-    let (publisher, wallet_subscriptions) = pubsub_connector(handle.clone(), 100);
+    let (publisher, wallet_subscriptions) = pubsub_connector(handle.clone(), 1000);
     let wallet_subscriptions = Arc::new(wallet_subscriptions);
     create_peer_db_folder(&config.wallet_peer_db_path)?;
     let (wallet_comms, wallet_dht) = setup_wallet_comms(
@@ -973,6 +979,8 @@ async fn setup_base_node_comms(
     publisher: PubsubDomainConnector,
 ) -> Result<(CommsNode, Dht), String>
 {
+    // Ensure that the node identity has the correct public address
+    node_identity.set_public_address(config.public_address.clone());
     let comms_config = CommsConfig {
         node_identity,
         transport_type: setup_transport_type(&config),
@@ -988,7 +996,7 @@ async fn setup_base_node_comms(
         },
         // TODO: This should be false unless testing locally - make this configurable
         allow_test_addresses: true,
-        listener_liveness_whitelist_cidrs: config.listener_liveness_whitelist_cidrs.clone(),
+        listener_liveness_allowlist_cidrs: config.listener_liveness_allowlist_cidrs.clone(),
         listener_liveness_max_sessions: config.listnener_liveness_max_sessions,
     };
 
@@ -1040,7 +1048,7 @@ async fn setup_wallet_comms(
         },
         // TODO: This should be false unless testing locally - make this configurable
         allow_test_addresses: true,
-        listener_liveness_whitelist_cidrs: Vec::new(),
+        listener_liveness_allowlist_cidrs: Vec::new(),
         listener_liveness_max_sessions: 0,
     };
 

@@ -122,8 +122,8 @@ pub struct ConnectionManagerConfig {
     pub time_to_first_byte: Duration,
     /// The number of liveness check sessions to allow. Default: 0
     pub liveness_max_sessions: usize,
-    /// CIDR blocks that whitelist liveness checks. Default: Localhost only (127.0.0.1/32)
-    pub liveness_cidr_whitelist: Vec<cidr::AnyIpCidr>,
+    /// CIDR blocks that allowlist liveness checks. Default: Localhost only (127.0.0.1/32)
+    pub liveness_cidr_allowlist: Vec<cidr::AnyIpCidr>,
 }
 
 impl Default for ConnectionManagerConfig {
@@ -142,7 +142,7 @@ impl Default for ConnectionManagerConfig {
             allow_test_addresses: true,
             liveness_max_sessions: 0,
             time_to_first_byte: Duration::from_secs(7),
-            liveness_cidr_whitelist: vec![cidr::AnyIpCidr::V4("127.0.0.1/32".parse().unwrap())],
+            liveness_cidr_allowlist: vec![cidr::AnyIpCidr::V4("127.0.0.1/32".parse().unwrap())],
         }
     }
 }
@@ -180,7 +180,6 @@ where
         request_rx: mpsc::Receiver<ConnectionManagerRequest>,
         node_identity: Arc<NodeIdentity>,
         peer_manager: Arc<PeerManager>,
-        protocols: Protocols<Substream>,
         connection_manager_events_tx: broadcast::Sender<Arc<ConnectionManagerEvent>>,
         shutdown_signal: ShutdownSignal,
     ) -> Self
@@ -189,8 +188,6 @@ where
 
         let (dialer_tx, dialer_rx) = mpsc::channel(DIALER_REQUEST_CHANNEL_SIZE);
 
-        let supported_protocols = protocols.get_supported_protocols();
-
         let listener = PeerListener::new(
             config.clone(),
             transport.clone(),
@@ -198,7 +195,6 @@ where
             internal_event_tx.clone(),
             peer_manager.clone(),
             Arc::clone(&node_identity),
-            supported_protocols.clone(),
             shutdown_signal.clone(),
         );
 
@@ -211,7 +207,6 @@ where
             backoff,
             dialer_rx,
             internal_event_tx,
-            supported_protocols,
             shutdown_signal.clone(),
         );
 
@@ -221,7 +216,7 @@ where
             request_rx: request_rx.fuse(),
             node_identity,
             peer_manager,
-            protocols,
+            protocols: Protocols::new(),
             internal_event_rx: internal_event_rx.fuse(),
             dialer_tx,
             dialer: Some(dialer),
@@ -232,6 +227,11 @@ where
             connection_manager_events_tx,
             complete_trigger: Shutdown::new(),
         }
+    }
+
+    pub fn set_protocols(&mut self, protocols: Protocols<Substream>) -> &mut Self {
+        self.protocols = protocols;
+        self
     }
 
     pub fn complete_signal(&self) -> ShutdownSignal {
@@ -295,21 +295,23 @@ where
     }
 
     fn run_listener(&mut self) {
-        let listener = self
+        let mut listener = self
             .listener
             .take()
             .expect("ConnectionManager initialized without a listener");
 
-        runtime::current_executor().spawn(listener.run());
+        listener.set_supported_protocols(self.protocols.get_supported_protocols());
+        runtime::current().spawn(listener.run());
     }
 
     fn run_dialer(&mut self) {
-        let dialer = self
+        let mut dialer = self
             .dialer
             .take()
             .expect("ConnectionManager initialized without a dialer");
 
-        runtime::current_executor().spawn(dialer.run());
+        dialer.set_supported_protocols(self.protocols.get_supported_protocols());
+        runtime::current().spawn(dialer.run());
     }
 
     async fn handle_request(&mut self, request: ConnectionManagerRequest) {
@@ -542,7 +544,7 @@ where
             linger.as_millis()
         );
 
-        runtime::current_executor().spawn(async move {
+        runtime::current().spawn(async move {
             debug!(
                 target: LOG_TARGET,
                 "Waiting for linger period ({}ms) to expire...",

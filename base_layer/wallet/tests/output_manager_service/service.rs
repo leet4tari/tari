@@ -42,7 +42,10 @@ use tari_comms_dht::outbound::mock::{create_outbound_service_mock, OutboundServi
 use tari_core::{
     base_node::proto::{
         base_node as BaseNodeProto,
-        base_node::base_node_service_response::Response as BaseNodeResponseProto,
+        base_node::{
+            base_node_service_request::Request,
+            base_node_service_response::Response as BaseNodeResponseProto,
+        },
     },
     transactions::{
         fee::Fee,
@@ -57,7 +60,7 @@ use tari_crypto::{
     commitment::HomomorphicCommitmentFactory,
     keys::SecretKey,
     range_proof::RangeProofService,
-    tari_utilities::ByteArray,
+    tari_utilities::{hash::Hashable, ByteArray},
 };
 use tari_p2p::domain_message::DomainMessage;
 use tari_service_framework::reply_channel;
@@ -70,8 +73,9 @@ use tari_wallet::{
         handle::{OutputManagerEvent, OutputManagerHandle},
         service::OutputManagerService,
         storage::{
-            database::{DbKey, DbValue, OutputManagerBackend, OutputManagerDatabase},
+            database::{DbKey, DbKeyValuePair, DbValue, OutputManagerBackend, OutputManagerDatabase, WriteOperation},
             memory_db::OutputManagerMemoryDatabase,
+            models::DbUnblindedOutput,
             sqlite_db::OutputManagerSqliteDatabase,
         },
     },
@@ -98,7 +102,7 @@ pub fn setup_output_manager_service<T: OutputManagerBackend + 'static>(
     let (outbound_message_requester, mock_outbound_service) = create_outbound_service_mock(20);
     let (oms_request_sender, oms_request_receiver) = reply_channel::unbounded();
     let (base_node_response_sender, base_node_response_receiver) = mpsc::channel(20);
-    let (oms_event_publisher, oms_event_subscriber) = bounded(100);
+    let (oms_event_publisher, oms_event_subscriber) = bounded(100, 115);
 
     let (ts_request_sender, _ts_request_receiver) = reply_channel::unbounded();
     let (event_publisher, _) = channel(100);
@@ -108,6 +112,7 @@ pub fn setup_output_manager_service<T: OutputManagerBackend + 'static>(
         .block_on(OutputManagerService::new(
             OutputManagerServiceConfig {
                 base_node_query_timeout: Duration::from_secs(10),
+                max_utxo_query_size: 2,
             },
             outbound_message_requester.clone(),
             ts_handle.clone(),
@@ -648,18 +653,59 @@ fn test_startup_utxo_scan() {
     let factories = CryptoFactories::default();
 
     let mut runtime = Runtime::new().unwrap();
+    let backend = OutputManagerMemoryDatabase::new();
+
+    let invalid_key = PrivateKey::random(&mut OsRng);
+    let invalid_value = 666;
+    let invalid_output = UnblindedOutput::new(MicroTari::from(invalid_value), invalid_key.clone(), None);
+    let invalid_hash = invalid_output.as_transaction_output(&factories).unwrap().hash();
+
+    backend
+        .write(WriteOperation::Insert(DbKeyValuePair::UnspentOutput(
+            invalid_output.spending_key.clone(),
+            Box::new(DbUnblindedOutput::from_unblinded_output(invalid_output.clone(), &factories).unwrap()),
+        )))
+        .unwrap();
+    backend
+        .invalidate_unspent_output(
+            &DbUnblindedOutput::from_unblinded_output(invalid_output.clone(), &factories).unwrap(),
+        )
+        .unwrap();
 
     let (mut oms, outbound_service, _shutdown, mut base_node_response_sender, _) =
-        setup_output_manager_service(&mut runtime, OutputManagerMemoryDatabase::new());
+        setup_output_manager_service(&mut runtime, backend);
+    let mut hashes = Vec::new();
     let key1 = PrivateKey::random(&mut OsRng);
     let value1 = 500;
-    let output1 = UnblindedOutput::new(MicroTari::from(value1), key1, None);
-
+    let output1 = UnblindedOutput::new(MicroTari::from(value1), key1.clone(), None);
+    let tx_output1 = output1.as_transaction_output(&factories).unwrap();
+    let output1_hash = tx_output1.hash();
+    hashes.push(output1_hash.clone());
     runtime.block_on(oms.add_output(output1.clone())).unwrap();
+
     let key2 = PrivateKey::random(&mut OsRng);
     let value2 = 800;
-    let output2 = UnblindedOutput::new(MicroTari::from(value2), key2, None);
+    let output2 = UnblindedOutput::new(MicroTari::from(value2), key2.clone(), None);
+    let tx_output2 = output2.as_transaction_output(&factories).unwrap();
+    hashes.push(tx_output2.hash());
+
     runtime.block_on(oms.add_output(output2.clone())).unwrap();
+
+    let key3 = PrivateKey::random(&mut OsRng);
+    let value3 = 900;
+    let output3 = UnblindedOutput::new(MicroTari::from(value3), key3.clone(), None);
+    let tx_output3 = output3.as_transaction_output(&factories).unwrap();
+    hashes.push(tx_output3.hash());
+
+    runtime.block_on(oms.add_output(output3.clone())).unwrap();
+
+    let key4 = PrivateKey::random(&mut OsRng);
+    let value4 = 901;
+    let output4 = UnblindedOutput::new(MicroTari::from(value4), key4.clone(), None);
+    let tx_output4 = output4.as_transaction_output(&factories).unwrap();
+    hashes.push(tx_output4.hash());
+
+    runtime.block_on(oms.add_output(output4.clone())).unwrap();
 
     let base_node_identity = NodeIdentity::random(
         &mut OsRng,
@@ -672,16 +718,60 @@ fn test_startup_utxo_scan() {
         .block_on(oms.set_base_node_public_key(base_node_identity.public_key().clone()))
         .unwrap();
 
+    outbound_service
+        .wait_call_count(3, Duration::from_secs(60))
+        .expect("call wait 1");
+
+    let (_, _) = outbound_service.pop_call().unwrap(); // Burn the invalid request
+
+    let (_, body) = outbound_service.pop_call().unwrap();
+    let envelope_body = EnvelopeBody::decode(body.to_vec().as_slice()).unwrap();
+    let bn_request1: BaseNodeProto::BaseNodeServiceRequest = envelope_body
+        .decode_part::<BaseNodeProto::BaseNodeServiceRequest>(1)
+        .unwrap()
+        .unwrap();
+
+    match bn_request1.request {
+        None => assert!(false, "Invalid request"),
+        Some(request) => match request {
+            Request::FetchUtxos(hash_outputs) => {
+                for h in hash_outputs.outputs {
+                    assert!(hashes.iter().find(|i| **i == h).is_some(), "Should contain hash");
+                }
+            },
+            _ => assert!(false, "invalid request"),
+        },
+    }
+
+    let (_, body) = outbound_service.pop_call().unwrap();
+    let envelope_body = EnvelopeBody::decode(body.to_vec().as_slice()).unwrap();
+    let bn_request2: BaseNodeProto::BaseNodeServiceRequest = envelope_body
+        .decode_part::<BaseNodeProto::BaseNodeServiceRequest>(1)
+        .unwrap()
+        .unwrap();
+
+    match bn_request2.request {
+        None => assert!(false, "Invalid request"),
+        Some(request) => match request {
+            Request::FetchUtxos(hash_outputs) => {
+                for h in hash_outputs.outputs {
+                    assert!(hashes.iter().find(|i| **i == h).is_some(), "Should contain hash2");
+                }
+            },
+            _ => assert!(false, "invalid request"),
+        },
+    }
+
     let result_stream = runtime.block_on(async {
         collect_stream!(
             oms.get_event_stream_fused().map(|i| (*i).clone()),
-            take = 1,
+            take = 3,
             timeout = Duration::from_secs(60)
         )
     });
 
     assert_eq!(
-        1,
+        3,
         result_stream.iter().fold(0, |acc, item| {
             if let OutputManagerEvent::BaseNodeSyncRequestTimedOut(_) = item {
                 acc + 1
@@ -691,17 +781,87 @@ fn test_startup_utxo_scan() {
         })
     );
 
-    let key3 = PrivateKey::random(&mut OsRng);
-    let value3 = 900;
-    let output3 = UnblindedOutput::new(MicroTari::from(value3), key3, None);
-    runtime.block_on(oms.add_output(output3.clone())).unwrap();
+    // Test the response to the revalidation call first so as not to confuse the invalidation that happens during the
+    // responses to the Unspent UTXO queries
+    let mut invalid_request_key = 0;
+    let mut unspent_request_key_with_output1 = 0;
 
-    let (_, body) = outbound_service.pop_call().unwrap();
-    let envelope_body = EnvelopeBody::decode(body.to_vec().as_slice()).unwrap();
-    let bn_request: BaseNodeProto::BaseNodeServiceRequest = envelope_body
-        .decode_part::<BaseNodeProto::BaseNodeServiceRequest>(1)
-        .unwrap()
+    for _ in 0..3 {
+        let (_, body) = outbound_service.pop_call().unwrap();
+        let envelope_body = EnvelopeBody::decode(body.to_vec().as_slice()).unwrap();
+        let bn_request: BaseNodeProto::BaseNodeServiceRequest = envelope_body
+            .decode_part::<BaseNodeProto::BaseNodeServiceRequest>(1)
+            .unwrap()
+            .unwrap();
+
+        let request_hashes = if let Request::FetchUtxos(outputs) = bn_request.request.unwrap() {
+            outputs.outputs
+        } else {
+            assert!(false, "Wrong request type");
+            Vec::new()
+        };
+
+        if request_hashes.iter().find(|i| **i == invalid_hash).is_some() {
+            invalid_request_key = bn_request.request_key;
+        }
+        if request_hashes.iter().find(|i| **i == output1_hash).is_some() {
+            unspent_request_key_with_output1 = bn_request.request_key;
+        }
+    }
+    assert_ne!(invalid_request_key, 0, "Should have found invalid request key");
+    assert_ne!(
+        unspent_request_key_with_output1, 0,
+        "Should have found request key for request with output 1 in it"
+    );
+
+    let invalid_txs = runtime.block_on(oms.get_invalid_outputs()).unwrap();
+    assert_eq!(invalid_txs.len(), 1);
+    let base_node_response = BaseNodeProto::BaseNodeServiceResponse {
+        request_key: invalid_request_key,
+        response: Some(BaseNodeResponseProto::TransactionOutputs(
+            BaseNodeProto::TransactionOutputs {
+                outputs: vec![invalid_output.clone().as_transaction_output(&factories).unwrap().into()].into(),
+            },
+        )),
+    };
+
+    runtime
+        .block_on(base_node_response_sender.send(create_dummy_message(
+            base_node_response,
+            base_node_identity.public_key(),
+        )))
         .unwrap();
+
+    let mut event_stream = oms.get_event_stream_fused();
+
+    runtime.block_on(async {
+        let mut delay = delay_for(Duration::from_secs(60)).fuse();
+        let mut acc = 0;
+        loop {
+            futures::select! {
+                event = event_stream.select_next_some() => {
+                    if let OutputManagerEvent::ReceiveBaseNodeResponse(_) = (*event).clone() {
+                        acc += 1;
+                        if acc >= 1 {
+                            break;
+                        }
+                    }
+                },
+                () = delay => {
+                    break;
+                },
+            }
+        }
+        assert!(acc >= 1, "Did not receive enough responses");
+    });
+
+    let invalid_txs = runtime.block_on(oms.get_invalid_outputs()).unwrap();
+    assert_eq!(invalid_txs.len(), 0);
+
+    let key4 = PrivateKey::random(&mut OsRng);
+    let value4 = 1000;
+    let output4 = UnblindedOutput::new(MicroTari::from(value4), key4, None);
+    runtime.block_on(oms.add_output(output4.clone())).unwrap();
 
     let invalid_txs = runtime.block_on(oms.get_invalid_outputs()).unwrap();
     assert_eq!(invalid_txs.len(), 0);
@@ -726,7 +886,7 @@ fn test_startup_utxo_scan() {
     assert_eq!(invalid_txs.len(), 0);
 
     let base_node_response = BaseNodeProto::BaseNodeServiceResponse {
-        request_key: bn_request.request_key.clone(),
+        request_key: unspent_request_key_with_output1,
         response: Some(BaseNodeResponseProto::TransactionOutputs(
             BaseNodeProto::TransactionOutputs {
                 outputs: vec![output1.clone().as_transaction_output(&factories).unwrap().into()].into(),
@@ -741,39 +901,63 @@ fn test_startup_utxo_scan() {
         )))
         .unwrap();
 
-    let result_stream = runtime.block_on(async {
-        collect_stream!(
-            oms.get_event_stream_fused().map(|i| (*i).clone()),
-            take = 2,
-            timeout = Duration::from_secs(60)
-        )
-    });
-
-    assert_eq!(
-        1,
-        result_stream.iter().fold(0, |acc, item| {
-            if let OutputManagerEvent::ReceiveBaseNodeResponse(_) = item {
-                acc + 1
-            } else {
-                acc
+    runtime.block_on(async {
+        let mut delay = delay_for(Duration::from_secs(60)).fuse();
+        let mut acc = 0;
+        loop {
+            futures::select! {
+                event = event_stream.select_next_some() => {
+                    if let OutputManagerEvent::ReceiveBaseNodeResponse(_) = (*event).clone() {
+                        acc += 1;
+                        if acc >= 1 {
+                            break;
+                        }
+                    }
+                },
+                () = delay => {
+                    break;
+                },
             }
-        })
-    );
+        }
+        assert!(acc >= 1, "Did not receive enough responses");
+    });
 
     let invalid_outputs = runtime.block_on(oms.get_invalid_outputs()).unwrap();
     assert_eq!(invalid_outputs.len(), 1);
-    assert_eq!(invalid_outputs[0], output2);
+    let check2 = invalid_outputs[0] == output2;
+    let check3 = invalid_outputs[0] == output3;
+    let check4 = invalid_outputs[0] == output4;
+
+    assert!(check2 || check3 || check4, "One of these outputs should be invalid");
 
     let unspent_outputs = runtime.block_on(oms.get_unspent_outputs()).unwrap();
-    assert_eq!(unspent_outputs.len(), 2);
+    assert_eq!(unspent_outputs.len(), 5);
     assert!(unspent_outputs.iter().find(|uo| uo == &&output1).is_some());
-    assert!(unspent_outputs.iter().find(|uo| uo == &&output3).is_some());
+    if check2 {
+        assert!(unspent_outputs.iter().find(|uo| uo == &&output3).is_some())
+    } else {
+        assert!(unspent_outputs.iter().find(|uo| uo == &&output2).is_some())
+    }
 
     runtime.block_on(oms.sync_with_base_node()).unwrap();
 
     let (_, body) = outbound_service.pop_call().unwrap();
     let envelope_body = EnvelopeBody::decode(body.to_vec().as_slice()).unwrap();
     let bn_request: BaseNodeProto::BaseNodeServiceRequest = envelope_body
+        .decode_part::<BaseNodeProto::BaseNodeServiceRequest>(1)
+        .unwrap()
+        .unwrap();
+
+    let (_, body) = outbound_service.pop_call().unwrap();
+    let envelope_body = EnvelopeBody::decode(body.to_vec().as_slice()).unwrap();
+    let bn_request2: BaseNodeProto::BaseNodeServiceRequest = envelope_body
+        .decode_part::<BaseNodeProto::BaseNodeServiceRequest>(1)
+        .unwrap()
+        .unwrap();
+
+    let (_, body) = outbound_service.pop_call().unwrap();
+    let envelope_body = EnvelopeBody::decode(body.to_vec().as_slice()).unwrap();
+    let bn_request3: BaseNodeProto::BaseNodeServiceRequest = envelope_body
         .decode_part::<BaseNodeProto::BaseNodeServiceRequest>(1)
         .unwrap()
         .unwrap();
@@ -787,9 +971,36 @@ fn test_startup_utxo_scan() {
             BaseNodeProto::TransactionOutputs { outputs: vec![].into() },
         )),
     };
+
     runtime
         .block_on(base_node_response_sender.send(create_dummy_message(
             base_node_response,
+            base_node_identity.public_key(),
+        )))
+        .unwrap();
+
+    let base_node_response2 = BaseNodeProto::BaseNodeServiceResponse {
+        request_key: bn_request2.request_key.clone(),
+        response: Some(BaseNodeResponseProto::TransactionOutputs(
+            BaseNodeProto::TransactionOutputs { outputs: vec![].into() },
+        )),
+    };
+    runtime
+        .block_on(base_node_response_sender.send(create_dummy_message(
+            base_node_response2,
+            base_node_identity.public_key(),
+        )))
+        .unwrap();
+
+    let base_node_response3 = BaseNodeProto::BaseNodeServiceResponse {
+        request_key: bn_request3.request_key.clone(),
+        response: Some(BaseNodeResponseProto::TransactionOutputs(
+            BaseNodeProto::TransactionOutputs { outputs: vec![].into() },
+        )),
+    };
+    runtime
+        .block_on(base_node_response_sender.send(create_dummy_message(
+            base_node_response3,
             base_node_identity.public_key(),
         )))
         .unwrap();
@@ -802,9 +1013,9 @@ fn test_startup_utxo_scan() {
         loop {
             futures::select! {
                 event = event_stream.select_next_some() => {
-                    if let OutputManagerEvent::ReceiveBaseNodeResponse(_) = (*event).clone() {
+                    if let OutputManagerEvent::ReceiveBaseNodeResponse(r) = (*event).clone() {
                         acc += 1;
-                        if acc >= 2 {
+                        if acc >= 4 {
                             break;
                         }
                     }
@@ -814,11 +1025,11 @@ fn test_startup_utxo_scan() {
                 },
             }
         }
-        assert!(acc >= 2, "Did not receive enough responses");
+        assert!(acc >= 3, "Did not receive enough responses");
     });
 
     let invalid_txs = runtime.block_on(oms.get_invalid_outputs()).unwrap();
-    assert_eq!(invalid_txs.len(), 3);
+    assert_eq!(invalid_txs.len(), 6);
 }
 
 fn sending_transaction_with_short_term_clear<T: Clone + OutputManagerBackend + 'static>(backend: T) {

@@ -38,13 +38,10 @@ use crate::{
 use futures::{future::BoxFuture, pin_mut, stream::FuturesUnordered, FutureExt, SinkExt, Stream, StreamExt};
 use log::*;
 use rand::{rngs::OsRng, RngCore};
-use std::{cmp::Ordering, collections::HashMap, convert::TryFrom, fmt, sync::Mutex, time::Duration};
+use std::{cmp, cmp::Ordering, collections::HashMap, convert::TryFrom, fmt, sync::Mutex, time::Duration};
 use tari_broadcast_channel::Publisher;
 use tari_comms::types::CommsPublicKey;
-use tari_comms_dht::{
-    domain_message::OutboundDomainMessage,
-    outbound::{OutboundEncryption, OutboundMessageRequester},
-};
+use tari_comms_dht::{domain_message::OutboundDomainMessage, outbound::OutboundMessageRequester};
 use tari_core::{
     base_node::proto::{
         base_node as BaseNodeProto,
@@ -99,6 +96,7 @@ where TBackend: OutputManagerBackend + 'static
     factories: CryptoFactories,
     base_node_public_key: Option<CommsPublicKey>,
     pending_utxo_query_keys: HashMap<u64, Vec<Vec<u8>>>,
+    pending_revalidation_query_keys: HashMap<u64, Vec<Vec<u8>>>,
     event_publisher: Publisher<OutputManagerEvent>,
 }
 
@@ -155,6 +153,7 @@ where
             factories,
             base_node_public_key: None,
             pending_utxo_query_keys: HashMap::new(),
+            pending_revalidation_query_keys: HashMap::new(),
             event_publisher,
         })
     }
@@ -195,7 +194,7 @@ where
                     let (origin_public_key, inner_msg) = msg.clone().into_origin_and_inner();
                     trace!(target: LOG_TARGET, "Handling Base Node Response, Trace: {}", msg.dht_header.message_tag);
                     let result = self.handle_base_node_response(inner_msg).await.or_else(|resp| {
-                        error!(target: LOG_TARGET, "Error handling base node service response from {}: {:?}", origin_public_key, resp);
+                        error!(target: LOG_TARGET, "Error handling base node service response from {}: {:?}, Trace: {}", origin_public_key, resp, msg.dht_header.message_tag);
                         Err(resp)
                     });
 
@@ -310,7 +309,7 @@ where
     }
 
     /// Handle an incoming basenode response message
-    pub async fn handle_base_node_response(
+    async fn handle_base_node_response(
         &mut self,
         response: BaseNodeProto::BaseNodeServiceResponse,
     ) -> Result<(), OutputManagerError>
@@ -324,95 +323,128 @@ where
             },
         };
 
-        // Only process requests with a request_key that we are expecting.
-        let queried_hashes: Vec<Vec<u8>> = match self.pending_utxo_query_keys.remove(&request_key) {
-            None => {
-                trace!(
-                    target: LOG_TARGET,
-                    "Ignoring Base Node Response with unexpected request key ({}), it was not meant for this service.",
-                    request_key
-                );
-                return Ok(());
-            },
-            Some(qh) => qh,
-        };
+        let mut unspent_query_handled = false;
+        let mut invalid_query_handled = false;
 
-        trace!(
-            target: LOG_TARGET,
-            "Handling a Base Node Response meant for this service"
-        );
-
-        // Construct a HashMap of all the unspent outputs
-        let unspent_outputs: Vec<DbUnblindedOutput> = self.db.get_unspent_outputs().await?;
-
-        let mut output_hashes = HashMap::new();
-        for uo in unspent_outputs.iter() {
-            let hash = uo.hash.clone();
-            if queried_hashes.iter().any(|h| &hash == h) {
-                output_hashes.insert(hash.clone(), uo.clone());
-            }
-        }
-
-        // Go through all the returned UTXOs and if they are in the hashmap remove them
-        for output in response.iter() {
-            let response_hash = TransactionOutput::try_from(output.clone())
-                .map_err(OutputManagerError::ConversionError)?
-                .hash();
-
-            let _ = output_hashes.remove(&response_hash);
-        }
-
-        // If there are any remaining Unspent Outputs we will move them to the invalid collection
-        for (_k, v) in output_hashes {
-            // Get the transaction these belonged to so we can display the kernel signature of the transaction this
-            // output belonged to.
-
-            warn!(
+        // Check if the received key is in the pending UTXO query list to be handled
+        if let Some(queried_hashes) = self.pending_utxo_query_keys.remove(&request_key) {
+            trace!(
                 target: LOG_TARGET,
-                "Output with value {} not returned from Base Node query and is thus being invalidated",
-                v.unblinded_output.value
+                "Handling a Base Node Response for a Unspent Outputs request ({})",
+                request_key
             );
-            // If the output that is being invalidated has an associated TxId then get the kernel signature of the
-            // transaction and display for easier debugging
-            if let Some(tx_id) = self.db.invalidate_output(v).await? {
-                if let Ok(transaction) = self.transaction_service.get_completed_transaction(tx_id).await {
+
+            // Construct a HashMap of all the unspent outputs
+            let unspent_outputs: Vec<DbUnblindedOutput> = self.db.get_unspent_outputs().await?;
+
+            let mut output_hashes = HashMap::new();
+            for uo in unspent_outputs.iter() {
+                let hash = uo.hash.clone();
+                if queried_hashes.iter().any(|h| &hash == h) {
+                    output_hashes.insert(hash.clone(), uo.clone());
+                }
+            }
+
+            // Go through all the returned UTXOs and if they are in the hashmap remove them
+            for output in response.iter() {
+                let response_hash = TransactionOutput::try_from(output.clone())
+                    .map_err(OutputManagerError::ConversionError)?
+                    .hash();
+
+                let _ = output_hashes.remove(&response_hash);
+            }
+
+            // If there are any remaining Unspent Outputs we will move them to the invalid collection
+            for (_k, v) in output_hashes {
+                // Get the transaction these belonged to so we can display the kernel signature of the transaction
+                // this output belonged to.
+
+                warn!(
+                    target: LOG_TARGET,
+                    "Output with value {} not returned from Base Node query and is thus being invalidated",
+                    v.unblinded_output.value
+                );
+                // If the output that is being invalidated has an associated TxId then get the kernel signature of
+                // the transaction and display for easier debugging
+                if let Some(tx_id) = self.db.invalidate_output(v).await? {
+                    if let Ok(transaction) = self.transaction_service.get_completed_transaction(tx_id).await {
+                        info!(
+                            target: LOG_TARGET,
+                            "Invalidated Output is from Transaction (TxId: {}) with message: {} and Kernel Signature: \
+                             {}",
+                            transaction.tx_id,
+                            transaction.message,
+                            transaction.transaction.body.kernels()[0]
+                                .excess_sig
+                                .get_signature()
+                                .to_hex()
+                        )
+                    }
+                } else {
                     info!(
                         target: LOG_TARGET,
-                        "Invalidated Output is from Transaction (TxId: {}) with message: {} and Kernel Signature: {}",
-                        transaction.tx_id,
-                        transaction.message,
-                        transaction.transaction.body.kernels()[0]
-                            .excess_sig
-                            .get_signature()
-                            .to_hex()
-                    )
+                        "Invalidated Output does not have an associated TxId so it is likely a Coinbase output lost \
+                         to a Re-Org"
+                    );
                 }
-            } else {
-                info!(
-                    target: LOG_TARGET,
-                    "Invalidated Output does not have an associated TxId so it is likely a Coinbase output lost to a \
-                     Re-Org"
-                );
             }
+            unspent_query_handled = true;
+            debug!(
+                target: LOG_TARGET,
+                "Handled Base Node response for Unspent Outputs Query {}", request_key
+            );
+        };
+
+        // Check if the received key is in the Invalid UTXO query list waiting to be handled
+        if self.pending_revalidation_query_keys.remove(&request_key).is_some() {
+            trace!(
+                target: LOG_TARGET,
+                "Handling a Base Node Response for a Invalid Outputs request ({})",
+                request_key
+            );
+            let invalid_outputs = self.db.get_invalid_outputs().await?;
+
+            for output in response.iter() {
+                let response_hash = TransactionOutput::try_from(output.clone())
+                    .map_err(OutputManagerError::ConversionError)?
+                    .hash();
+
+                if let Some(output) = invalid_outputs.iter().find(|o| o.hash == response_hash) {
+                    if self
+                        .db
+                        .revalidate_output(output.unblinded_output.spending_key.clone())
+                        .await
+                        .is_ok()
+                    {
+                        trace!(
+                            target: LOG_TARGET,
+                            "Output with value {} has been restored to a valid spendable output",
+                            output.unblinded_output.value
+                        );
+                    }
+                }
+            }
+            invalid_query_handled = true;
+            debug!(
+                target: LOG_TARGET,
+                "Handled Base Node response for Invalid Outputs Query {}", request_key
+            );
         }
 
-        debug!(
-            target: LOG_TARGET,
-            "Handled Base Node response for Query {}", request_key
-        );
-
-        let _ = self
-            .event_publisher
-            .send(OutputManagerEvent::ReceiveBaseNodeResponse(request_key))
-            .await
-            .map_err(|e| {
-                trace!(
-                    target: LOG_TARGET,
-                    "Error sending event, usually because there are no subscribers: {:?}",
+        if unspent_query_handled || invalid_query_handled {
+            let _ = self
+                .event_publisher
+                .send(OutputManagerEvent::ReceiveBaseNodeResponse(request_key))
+                .await
+                .map_err(|e| {
+                    trace!(
+                        target: LOG_TARGET,
+                        "Error sending event, usually because there are no subscribers: {:?}",
+                        e
+                    );
                     e
-                );
-                e
-            });
+                });
+        }
 
         Ok(())
     }
@@ -424,72 +456,190 @@ where
         utxo_query_timeout_futures: &mut FuturesUnordered<BoxFuture<'static, u64>>,
     ) -> Result<(), OutputManagerError>
     {
-        if self.pending_utxo_query_keys.remove(&query_key).is_some() {
-            error!(target: LOG_TARGET, "UTXO Query {} timed out", query_key);
-            self.query_unspent_outputs_status(utxo_query_timeout_futures).await?;
-            // TODO Remove this once this bug is fixed
-            trace!(target: LOG_TARGET, "Finished queueing new Base Node query timeout");
-            let _ = self
-                .event_publisher
-                .send(OutputManagerEvent::BaseNodeSyncRequestTimedOut(query_key))
-                .await
-                .map_err(|e| {
-                    trace!(
-                        target: LOG_TARGET,
-                        "Error sending event, usually because there are no subscribers: {:?}",
-                        e
-                    );
-                    e
-                });
+        if let Some(hashes) = self.pending_utxo_query_keys.remove(&query_key) {
+            warn!(target: LOG_TARGET, "UTXO Unspent Outputs Query {} timed out", query_key);
+            self.query_outputs_status(utxo_query_timeout_futures, hashes, UtxoQueryType::UnspentOutputs)
+                .await?;
         }
+
+        if let Some(hashes) = self.pending_revalidation_query_keys.remove(&query_key) {
+            warn!(target: LOG_TARGET, "UTXO Invalid Outputs Query {} timed out", query_key);
+            self.query_outputs_status(utxo_query_timeout_futures, hashes, UtxoQueryType::InvalidOutputs)
+                .await?;
+        }
+
+        let _ = self
+            .event_publisher
+            .send(OutputManagerEvent::BaseNodeSyncRequestTimedOut(query_key))
+            .await
+            .map_err(|e| {
+                trace!(
+                    target: LOG_TARGET,
+                    "Error sending event, usually because there are no subscribers: {:?}",
+                    e
+                );
+                e
+            });
         Ok(())
     }
 
-    /// Send queries to the base node to check the status of all unspent outputs. If the outputs are no longer
-    /// available their status will be updated in the wallet.
     pub async fn query_unspent_outputs_status(
         &mut self,
         utxo_query_timeout_futures: &mut FuturesUnordered<BoxFuture<'static, u64>>,
     ) -> Result<u64, OutputManagerError>
     {
+        let unspent_output_hashes = self
+            .db
+            .get_unspent_outputs()
+            .await?
+            .iter()
+            .map(|uo| uo.hash.clone())
+            .collect();
+
+        let key = self
+            .query_outputs_status(
+                utxo_query_timeout_futures,
+                unspent_output_hashes,
+                UtxoQueryType::UnspentOutputs,
+            )
+            .await?;
+
+        Ok(key)
+    }
+
+    pub async fn query_invalid_outputs_status(
+        &mut self,
+        utxo_query_timeout_futures: &mut FuturesUnordered<BoxFuture<'static, u64>>,
+    ) -> Result<u64, OutputManagerError>
+    {
+        let invalid_output_hashes: Vec<_> = self
+            .db
+            .get_invalid_outputs()
+            .await?
+            .into_iter()
+            .map(|uo| uo.hash)
+            .collect();
+
+        let key = if !invalid_output_hashes.is_empty() {
+            self.query_outputs_status(
+                utxo_query_timeout_futures,
+                invalid_output_hashes,
+                UtxoQueryType::InvalidOutputs,
+            )
+            .await?
+        } else {
+            0
+        };
+
+        Ok(key)
+    }
+
+    /// Send queries to the base node to check the status of all specified outputs.
+    async fn query_outputs_status(
+        &mut self,
+        utxo_query_timeout_futures: &mut FuturesUnordered<BoxFuture<'static, u64>>,
+        mut outputs_to_query: Vec<Vec<u8>>,
+        query_type: UtxoQueryType,
+    ) -> Result<u64, OutputManagerError>
+    {
         match self.base_node_public_key.as_ref() {
             None => Err(OutputManagerError::NoBaseNodeKeysProvided),
             Some(pk) => {
-                let unspent_outputs: Vec<DbUnblindedOutput> = self.db.get_unspent_outputs().await?;
-                let mut output_hashes = Vec::new();
-                for uo in unspent_outputs.iter() {
-                    let hash = uo.hash.clone();
-                    output_hashes.push(hash.clone());
+                let mut first_request_key = 0;
+
+                // Determine how many rounds of base node request we need to query all the outputs in batches of
+                // max_utxo_query_size
+                let rounds =
+                    ((outputs_to_query.len() as f32) / (self.config.max_utxo_query_size as f32 + 0.1)) as usize + 1;
+
+                for r in 0..rounds {
+                    let mut output_hashes = Vec::new();
+                    for uo_hash in
+                        outputs_to_query.drain(..cmp::min(self.config.max_utxo_query_size, outputs_to_query.len()))
+                    {
+                        output_hashes.push(uo_hash);
+                    }
+                    let request_key = OsRng.next_u64();
+                    if first_request_key == 0 {
+                        first_request_key = request_key;
+                    }
+
+                    let request = BaseNodeRequestProto::FetchUtxos(BaseNodeProto::HashOutputs {
+                        outputs: output_hashes.clone(),
+                    });
+
+                    let service_request = BaseNodeProto::BaseNodeServiceRequest {
+                        request_key,
+                        request: Some(request),
+                    };
+
+                    let send_message_response = self
+                        .outbound_message_service
+                        .send_direct(
+                            pk.clone(),
+                            OutboundDomainMessage::new(TariMessageType::BaseNodeRequest, service_request),
+                        )
+                        .await?;
+
+                    // Here we are going to spawn a non-blocking task that will monitor and log the progress of the
+                    // send process.
+                    tokio::spawn(async move {
+                        match send_message_response.resolve().await {
+                            Err(err) => warn!(
+                                target: LOG_TARGET,
+                                "Failed to send Output Manager UTXO query ({}) to Base Node: {}", request_key, err
+                            ),
+                            Ok(send_states) => {
+                                trace!(
+                                    target: LOG_TARGET,
+                                    "Output Manager UTXO query ({}) queued for sending with Message {}",
+                                    request_key,
+                                    send_states[0].tag,
+                                );
+                                let message_tag = send_states[0].tag;
+                                if send_states.wait_single().await {
+                                    trace!(
+                                        target: LOG_TARGET,
+                                        "Output Manager UTXO query ({}) successfully sent to Base Node with Message {}",
+                                        request_key,
+                                        message_tag,
+                                    )
+                                } else {
+                                    trace!(
+                                        target: LOG_TARGET,
+                                        "Failed to send Output Manager UTXO query ({}) to Base Node with Message {}",
+                                        request_key,
+                                        message_tag,
+                                    );
+                                }
+                            },
+                        }
+                    });
+
+                    match query_type {
+                        UtxoQueryType::UnspentOutputs => {
+                            self.pending_utxo_query_keys.insert(request_key, output_hashes);
+                        },
+                        UtxoQueryType::InvalidOutputs => {
+                            self.pending_revalidation_query_keys.insert(request_key, output_hashes);
+                        },
+                    }
+
+                    let state_timeout = StateDelay::new(self.config.base_node_query_timeout, request_key);
+                    utxo_query_timeout_futures.push(state_timeout.delay().boxed());
+
+                    debug!(
+                        target: LOG_TARGET,
+                        "Output Manager {} query ({}) sent to Base Node, part {} of {} requests",
+                        query_type,
+                        request_key,
+                        r + 1,
+                        rounds
+                    );
                 }
-                let request_key = OsRng.next_u64();
-
-                let request = BaseNodeRequestProto::FetchUtxos(BaseNodeProto::HashOutputs {
-                    outputs: output_hashes.clone(),
-                });
-
-                let service_request = BaseNodeProto::BaseNodeServiceRequest {
-                    request_key,
-                    request: Some(request),
-                };
-                // TODO Remove this once this bug is fixed
-                trace!(target: LOG_TARGET, "About to attempt to send query to base node");
-                self.outbound_message_service
-                    .send_direct(
-                        pk.clone(),
-                        OutboundEncryption::None,
-                        OutboundDomainMessage::new(TariMessageType::BaseNodeRequest, service_request),
-                    )
-                    .await?;
-                // TODO Remove this once this bug is fixed
-                trace!(target: LOG_TARGET, "Query sent to Base Node");
-                self.pending_utxo_query_keys.insert(request_key, output_hashes);
-                let state_timeout = StateDelay::new(self.config.base_node_query_timeout, request_key);
-                utxo_query_timeout_futures.push(state_timeout.delay().boxed());
-                debug!(
-                    target: LOG_TARGET,
-                    "Output Manager Sync query ({}) sent to Base Node", request_key
-                );
-                Ok(request_key)
+                // We are just going to return the first request key for use by the front end. It is very unlikely that
+                // a mobile wallet will ever have this query split up
+                Ok(first_request_key)
             },
         }
     }
@@ -500,14 +650,14 @@ where
         Ok(self.db.add_unspent_output(output).await?)
     }
 
-    pub async fn get_balance(&self) -> Result<Balance, OutputManagerError> {
+    async fn get_balance(&self) -> Result<Balance, OutputManagerError> {
         let balance = self.db.get_balance().await?;
         trace!(target: LOG_TARGET, "Balance: {:?}", balance);
         Ok(balance)
     }
 
     /// Request a spending key to be used to accept a transaction from a sender.
-    pub async fn get_recipient_spending_key(
+    async fn get_recipient_spending_key(
         &mut self,
         tx_id: TxId,
         amount: MicroTari,
@@ -634,7 +784,7 @@ where
 
     /// Confirm that a transaction has finished being negotiated between parties so the short-term encumberance can be
     /// made official
-    pub async fn confirm_encumberance(&mut self, tx_id: u64) -> Result<(), OutputManagerError> {
+    async fn confirm_encumberance(&mut self, tx_id: u64) -> Result<(), OutputManagerError> {
         self.db.confirm_encumbered_outputs(tx_id).await?;
 
         Ok(())
@@ -643,7 +793,7 @@ where
     /// Confirm that a received or sent transaction and its outputs have been detected on the base chain. The inputs and
     /// outputs are checked to see that they match what the stored PendingTransaction contains. This will
     /// be called by the Transaction Service which monitors the base chain.
-    pub async fn confirm_transaction(
+    async fn confirm_transaction(
         &mut self,
         tx_id: u64,
         inputs: &[TransactionInput],
@@ -698,7 +848,7 @@ where
     }
 
     /// Go through the pending transaction and if any have existed longer than the specified duration, cancel them
-    pub async fn timeout_pending_transactions(&mut self, period: Duration) -> Result<(), OutputManagerError> {
+    async fn timeout_pending_transactions(&mut self, period: Duration) -> Result<(), OutputManagerError> {
         Ok(self.db.timeout_pending_transaction_outputs(period).await?)
     }
 
@@ -794,6 +944,7 @@ where
 
         if startup_query {
             self.query_unspent_outputs_status(utxo_query_timeout_futures).await?;
+            self.query_invalid_outputs_status(utxo_query_timeout_futures).await?;
         }
         Ok(())
     }
@@ -816,7 +967,7 @@ where
         Ok(self.db.get_invalid_outputs().await?)
     }
 
-    pub async fn create_coin_split(
+    async fn create_coin_split(
         &mut self,
         amount_per_split: MicroTari,
         split_count: usize,
@@ -950,5 +1101,19 @@ impl fmt::Display for Balance {
         writeln!(f, "Pending incoming balance: {}", self.pending_incoming_balance)?;
         write!(f, "Pending outgoing balance: {}", self.pending_outgoing_balance)?;
         Ok(())
+    }
+}
+
+enum UtxoQueryType {
+    UnspentOutputs,
+    InvalidOutputs,
+}
+
+impl fmt::Display for UtxoQueryType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            UtxoQueryType::UnspentOutputs => write!(f, "Unspent Outputs"),
+            UtxoQueryType::InvalidOutputs => write!(f, "Invalid Outputs"),
+        }
     }
 }

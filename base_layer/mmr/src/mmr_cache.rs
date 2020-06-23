@@ -166,6 +166,16 @@ where
         Ok(())
     }
 
+    /// Inform the MmrCache that the first N checkpoints have been merged to allow the base and current indices to be
+    /// updated.
+    pub fn checkpoints_merged(&mut self, num_merged: usize) -> Result<(), MerkleMountainRangeError> {
+        if let Some(num_reverse) = num_merged.checked_sub(1) {
+            self.base_cp_index = self.base_cp_index.saturating_sub(num_reverse);
+            self.curr_cp_index = self.curr_cp_index.saturating_sub(num_reverse);
+        }
+        self.update()
+    }
+
     /// This function updates the state of the MMR cache based on the current state of the shared checkpoints.
     pub fn update(&mut self) -> Result<(), MerkleMountainRangeError> {
         let cp_count = self
@@ -203,6 +213,15 @@ where
             return Ok((Some(base_hash), base_deleted | curr_deleted));
         }
         Ok((curr_hash, base_deleted | curr_deleted))
+    }
+
+    /// Search for the leaf index of the given hash in the nodes of the current and base MMR.
+    pub fn find_leaf_index(&self, hash: &Hash) -> Result<Option<u32>, MerkleMountainRangeError> {
+        let mut index = self.base_mmr.find_leaf_index(hash)?;
+        if index.is_none() {
+            index = self.curr_mmr.find_leaf_index(hash)?;
+        }
+        Ok(index)
     }
 }
 

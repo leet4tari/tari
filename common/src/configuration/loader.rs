@@ -62,53 +62,11 @@ use std::{
     fmt::{Display, Formatter},
 };
 
-//-------------------------------------------    ConfigExtractor trait    ------------------------------------------//
-/// Extract parts of the global Config file into custom configuration objects that are more specific and localised.
-/// The expected use case for this is to use `load_configuration` to load the global configuration file into a Config
-/// object. This is then used to generate other, localised configuration objects, for example, `MempoolConfig` etc.
-///
-/// # Example
-///
-/// ```edition2018
-/// # use tari_common::*;
-/// # use config::Config;
-/// struct MyConf {
-///     foo: usize,
-/// }
-///
-/// impl ConfigExtractor for MyConf {
-///     fn set_default(cfg: &mut Config) {
-///         cfg.set_default("main.foo", 5);
-///         cfg.set_default("test.foo", 6);
-///     }
-///
-///     fn extract_configuration(cfg: &Config, network: Network) -> Result<Self, ConfigurationError> {
-///         let key = match network {
-///             Network::MainNet => "main.foo",
-///             Network::Rincewind => "test.foo",
-///         };
-///         let foo = cfg.get_int(key).map_err(|e| ConfigurationError::new(&key, &e.to_string()))? as usize;
-///         Ok(MyConf { foo })
-///     }
-/// }
-/// ```
-#[deprecated(since = "0.0.10", note = "Please use ConfigPath and ConfigLoader traits instead")]
-pub trait ConfigExtractor {
-    /// Provides the default values for the Config object. This is used before `load_configuration` and ensures that
-    /// all config parameters have at least the default value set.
-    fn set_default(cfg: &mut Config);
-    /// After `load_configuration` has been called, you can construct a specific configuration object by calling
-    /// `extract_configuration` and it will create the object using values from the config file / environment variables
-    fn extract_configuration(cfg: &Config, network: Network) -> Result<Self, ConfigurationError>
-    where Self: Sized;
-}
-
 //-------------------------------------------    ConfigLoader trait    ------------------------------------------//
 
-/// Load struct from config's main section and subsecttion override
+/// Load struct from config's main section and subsection override
 ///
-/// Implementation of this trait along with Deserialize grants
-/// ConfigLoader implementation
+/// Implementation of this trait along with Deserialize grants `ConfigLoader` implementation
 pub trait ConfigPath {
     /// Main configuration section
     fn main_key_prefix() -> &'static str;
@@ -142,26 +100,54 @@ pub trait ConfigPath {
 
 /// Load struct from config's main section and network subsection override
 ///
-/// Network subsection will be choosen based on `use_network` key value
+/// Network subsection will be chosen based on `use_network` key value
 /// from the main section defined in this trait.
 ///
 /// Wrong network value will result in Error
 pub trait NetworkConfigPath {
     /// Main configuration section
     fn main_key_prefix() -> &'static str;
+    /// Path for `use_network` key in config
+    fn network_config_key() -> String {
+        let main = <Self as NetworkConfigPath>::main_key_prefix();
+        format!("{}.use_network", main)
+    }
 }
 impl<C: NetworkConfigPath> ConfigPath for C {
+    /// Returns the string representing the top level configuration category.
+    /// For example, in the following TOML file, options for `main_key_prefix` would be `MainKeyOne` or `MainKeyTwo`:
+    /// ```toml
+    /// [MainKeyOne]
+    ///   subkey1=1  
+    /// [MainKeyTwo]
+    ///   subkey2=1
+    /// ```
     fn main_key_prefix() -> &'static str {
         <Self as NetworkConfigPath>::main_key_prefix()
     }
 
+    /// Loads the desired subsection from the config file into the provided `config` and merges the results. The
+    /// subsection that is selected for merging is determined by the value of the `use_network` sub key of the "main"
+    /// section. For example, if a TOML configuration file contains the following:
+    ///
+    /// ```toml
+    /// [SectionA]
+    ///   use_network=foo  
+    ///   subkey=1
+    /// [SectionA.foo]
+    ///   subkey=2
+    /// [SectionA.baz]
+    ///   subkey=3
+    /// ```
+    ///
+    /// the result after calling `merge_config` would have the struct's `subkey` value set to 2. If `use_network`
+    /// were omitted, `subkey` would be 1, and if `use_network` were set to `baz`, `subkey` would be 3.
     fn overload_key_prefix(config: &Config) -> Result<Option<String>, ConfigurationError> {
-        let main = <Self as NetworkConfigPath>::main_key_prefix();
-        let network_key = format!("{}.use_network", main);
+        let network_key = Self::network_config_key();
         let network_val: Option<String> = config.get_str(network_key.as_str()).ok();
         if let Some(s) = network_val {
             let network: Network = s.parse()?;
-            Ok(Some(format!("{}.{}", main, network)))
+            Ok(Some(format!("{}.{}", Self::main_key_prefix(), network)))
         } else {
             Ok(None)
         }

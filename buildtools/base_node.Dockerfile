@@ -1,13 +1,13 @@
 #FROM rust:1.42.0 as builder
-FROM quay.io/tarilabs/rust_tari-build-with-deps:nightly-2020-01-08 as builder
+FROM quay.io/tarilabs/rust_tari-build-with-deps:nightly-2020-06-10 as builder
 
 # Copy the dependency lists
 #ADD Cargo.toml ./
 ADD . /tari_base_node
 WORKDIR /tari_base_node
 
-RUN rustup component add rustfmt --toolchain nightly-2020-01-08-x86_64-unknown-linux-gnu
-RUN RUSTFLAGS="-C target_cpu=nehalem" cargo build -p tari_base_node --release
+RUN rustup component add rustfmt --toolchain nightly-2020-06-10-x86_64-unknown-linux-gnu
+RUN ROARING_ARCH=nehalem RUSTFLAGS="-C target_cpu=nehalem" cargo build -p tari_base_node --release
 
 # Create a base minimal image for adding our executables to
 FROM bitnami/minideb:stretch as base
@@ -34,7 +34,6 @@ RUN apt update && apt install \
     # start.sh script to run tor, sleep 15 seconds and start the base node
     printf "#!/bin/bash\ntor &\nsleep 15\nif [[ ! -f ~/.tari/config.toml ]]; then\n  tari_base_node --init --create-id\nfi\ncd ~/.tari\ntari_base_node" > /usr/bin/start.sh && \
     chmod +x /usr/bin/start.sh
-
 
 # Now create a new image with only the essentials and throw everything else away
 FROM base

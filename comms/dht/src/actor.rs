@@ -36,7 +36,6 @@ use crate::{
     DhtConfig,
 };
 use chrono::{DateTime, Utc};
-use derive_error::Error;
 use futures::{
     channel::{mpsc, mpsc::SendError, oneshot},
     future,
@@ -54,6 +53,7 @@ use tari_comms::{
 };
 use tari_shutdown::ShutdownSignal;
 use tari_utilities::message_format::{MessageFormat, MessageFormatError};
+use thiserror::Error;
 use tokio::task;
 use ttl_cache::TtlCache;
 
@@ -61,25 +61,29 @@ const LOG_TARGET: &str = "comms::dht::actor";
 
 #[derive(Debug, Error)]
 pub enum DhtActorError {
-    /// MPSC channel is disconnected
+    #[error("MPSC channel is disconnected")]
     ChannelDisconnected,
-    /// MPSC sender was unable to send because the channel buffer is full
+    #[error("MPSC sender was unable to send because the channel buffer is full")]
     SendBufferFull,
-    /// Reply sender canceled the request
+    #[error("Reply sender canceled the request")]
     ReplyCanceled,
-    PeerManagerError(PeerManagerError),
-    #[error(msg_embedded, no_from, non_std)]
-    SendFailed(String),
-    DiscoveryError(DhtDiscoveryError),
-    BlockingJoinError(tokio::task::JoinError),
-    StorageError(StorageError),
-    #[error(no_from)]
+    #[error("PeerManagerError: {0}")]
+    PeerManagerError(#[from] PeerManagerError),
+    #[error("Failed to broadcast join message: {0}")]
+    FailedToBroadcastJoinMessage(String),
+    #[error("DiscoveryError: {0}")]
+    DiscoveryError(#[from] DhtDiscoveryError),
+    #[error("StorageError: {0}")]
+    StorageError(#[from] StorageError),
+    #[error("StoredValueFailedToDeserialize: {0}")]
     StoredValueFailedToDeserialize(MessageFormatError),
-    #[error(no_from)]
+    #[error("FailedToSerializeValue: {0}")]
     FailedToSerializeValue(MessageFormatError),
-    ConnectionManagerError(ConnectionManagerError),
-    ConnectivityError(ConnectivityError),
-    /// Connectivity event stream closed
+    #[error("ConnectionManagerError: {0}")]
+    ConnectionManagerError(#[from] ConnectionManagerError),
+    #[error("ConnectivityError: {0}")]
+    ConnectivityError(#[from] ConnectivityError),
+    #[error("Connectivity event stream closed")]
     ConnectivityEventStreamClosed,
 }
 
@@ -105,7 +109,7 @@ pub enum DhtRequest {
     /// Fetch selected peers according to the broadcast strategy
     SelectPeers(BroadcastStrategy, oneshot::Sender<Vec<NodeId>>),
     GetMetadata(DhtMetadataKey, oneshot::Sender<Result<Option<Vec<u8>>, DhtActorError>>),
-    SetMetadata(DhtMetadataKey, Vec<u8>),
+    SetMetadata(DhtMetadataKey, Vec<u8>, oneshot::Sender<Result<(), DhtActorError>>),
 }
 
 impl Display for DhtRequest {
@@ -115,8 +119,10 @@ impl Display for DhtRequest {
             SendJoin => f.write_str("SendJoin"),
             MsgHashCacheInsert(_, _) => f.write_str("MsgHashCacheInsert"),
             SelectPeers(s, _) => f.write_str(&format!("SelectPeers (Strategy={})", s)),
-            GetMetadata(key, _) => f.write_str(&format!("GetSetting (key={})", key)),
-            SetMetadata(key, value) => f.write_str(&format!("SetSetting (key={}, value={} bytes)", key, value.len())),
+            GetMetadata(key, _) => f.write_str(&format!("GetMetadata (key={})", key)),
+            SetMetadata(key, value, _) => {
+                f.write_str(&format!("SetMetadata (key={}, value={} bytes)", key, value.len()))
+            },
         }
     }
 }
@@ -164,9 +170,10 @@ impl DhtRequester {
     }
 
     pub async fn set_metadata<T: MessageFormat>(&mut self, key: DhtMetadataKey, value: T) -> Result<(), DhtActorError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
         let bytes = value.to_binary().map_err(DhtActorError::FailedToSerializeValue)?;
-        self.sender.send(DhtRequest::SetMetadata(key, bytes)).await?;
-        Ok(())
+        self.sender.send(DhtRequest::SetMetadata(key, bytes, reply_tx)).await?;
+        reply_rx.await.map_err(|_| DhtActorError::ReplyCanceled)?
     }
 }
 
@@ -183,6 +190,7 @@ pub struct DhtActor {
 }
 
 impl DhtActor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: DhtConfig,
         conn: DbConnection,
@@ -312,15 +320,17 @@ impl DhtActor {
                     Ok(())
                 })
             },
-            SetMetadata(key, value) => {
+            SetMetadata(key, value, reply_tx) => {
                 let db = self.database.clone();
                 Box::pin(async move {
                     match db.set_metadata_value_bytes(key, value).await {
                         Ok(_) => {
-                            debug!(target: LOG_TARGET, "Dht setting '{}' set", key);
+                            debug!(target: LOG_TARGET, "Dht metadata '{}' set", key);
+                            let _ = reply_tx.send(Ok(()));
                         },
                         Err(err) => {
-                            warn!(target: LOG_TARGET, "set_setting failed because {:?}", err);
+                            warn!(target: LOG_TARGET, "Unable to set metadata because {:?}", err);
+                            let _ = reply_tx.send(Err(err.into()));
                         },
                     }
                     Ok(())
@@ -349,7 +359,9 @@ impl DhtActor {
                 message,
             )
             .await
-            .map_err(|err| DhtActorError::SendFailed(format!("Failed to send join message: {}", err)))?;
+            .map_err(|err| {
+                DhtActorError::FailedToBroadcastJoinMessage(format!("Failed to send join message: {}", err))
+            })?;
 
         Ok(())
     }
@@ -560,35 +572,22 @@ impl DhtActor {
         let query = PeerQuery::new()
             .select_where(|peer| {
                 if peer.is_banned() {
-                    trace!(target: LOG_TARGET, "[{}] is banned", peer.node_id);
                     banned_count += 1;
                     return false;
                 }
 
                 if !peer.features.contains(features) {
-                    trace!(
-                        target: LOG_TARGET,
-                        "[{}] is does not have the required features {:?}",
-                        peer.node_id,
-                        features
-                    );
                     filtered_out_node_count += 1;
                     return false;
                 }
 
                 if peer.is_offline() {
-                    trace!(
-                        target: LOG_TARGET,
-                        "[{}] suffered too many connection attempt failures or is offline",
-                        peer.node_id
-                    );
                     connect_ineligable_count += 1;
                     return false;
                 }
 
                 let is_excluded = excluded_peers.contains(&peer.node_id);
                 if is_excluded {
-                    trace!(target: LOG_TARGET, "[{}] is explicitly excluded", peer.node_id);
                     excluded_count += 1;
                     return false;
                 }

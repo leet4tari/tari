@@ -116,7 +116,7 @@ impl ChainMetadataService {
             BlockEvent::Verified((_, BlockAddResult::ChainReorg(_), _)) => {
                 self.update_liveness_chain_metadata().await?;
             },
-            BlockEvent::Verified(_) | BlockEvent::Invalid(_) => {},
+            _ => {},
         }
 
         Ok(())
@@ -214,7 +214,9 @@ impl ChainMetadataService {
             let chain_metadata: ChainMetadata = proto::ChainMetadata::decode(chain_metadata_bytes.as_slice())?.into();
             debug!(
                 target: LOG_TARGET,
-                "Received chain metadata from NodeId '{}' - #{:?}", node_id, chain_metadata.height_of_longest_chain
+                "Received chain metadata from NodeId '{}' #{}",
+                node_id,
+                chain_metadata.height_of_longest_chain.unwrap_or(0)
             );
 
             if let Some(pos) = self
@@ -244,7 +246,9 @@ impl ChainMetadataService {
         let chain_metadata: ChainMetadata = proto::ChainMetadata::decode(chain_metadata_bytes.as_slice())?.into();
         debug!(
             target: LOG_TARGET,
-            "Received chain metadata from NodeId '{}' - #{:?}", node_id, chain_metadata.height_of_longest_chain
+            "Received chain metadata from NodeId '{}' - #{}",
+            node_id,
+            chain_metadata.height_of_longest_chain.unwrap_or(0)
         );
 
         if let Some(pos) = self
@@ -303,7 +307,7 @@ mod test {
 
             let (base_node, mut base_node_receiver) = create_base_node_nci();
 
-            let (publisher, _subscriber) = broadcast_channel::bounded(1);
+            let (publisher, _subscriber) = broadcast_channel::bounded(1, 106);
             let mut service = ChainMetadataService::new(liveness_handle, base_node, publisher);
 
             let mut proto_chain_metadata = create_sample_proto_chain_metadata();
@@ -347,7 +351,7 @@ mod test {
 
         let (base_node, _) = create_base_node_nci();
 
-        let (publisher, _subscriber) = broadcast_channel::bounded(1);
+        let (publisher, _subscriber) = broadcast_channel::bounded(1, 107);
         let mut service = ChainMetadataService::new(liveness_handle, base_node, publisher);
 
         // To prevent the chain metadata buffer being flushed after receiving a single pong event,
@@ -377,7 +381,7 @@ mod test {
         };
 
         let (base_node, _) = create_base_node_nci();
-        let (publisher, _subscriber) = broadcast_channel::bounded(1);
+        let (publisher, _subscriber) = broadcast_channel::bounded(1, 108);
         let mut service = ChainMetadataService::new(liveness_handle, base_node, publisher);
 
         let sample_event = LivenessEvent::ReceivedPong(Box::new(pong_event));
@@ -400,7 +404,7 @@ mod test {
         };
 
         let (base_node, _) = create_base_node_nci();
-        let (publisher, _subscriber) = broadcast_channel::bounded(1);
+        let (publisher, _subscriber) = broadcast_channel::bounded(1, 109);
         let mut service = ChainMetadataService::new(liveness_handle, base_node, publisher);
 
         let sample_event = LivenessEvent::ReceivedPong(Box::new(pong_event));

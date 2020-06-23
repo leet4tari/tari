@@ -44,7 +44,7 @@ service BaseNode {
     // Get Version
     rpc GetVersion(Empty) returns (StringValue);
     // Get coins in circulation
-    rpc GetTokensInCirculation(IntegerValue) returns (IntegerValue);
+    rpc GetTokensInCirculation(GetBlocksRequest) returns (stream ValueAtHeightResponse);
     // Get network difficulties
     rpc GetNetworkDifficulty(HeightRequest) returns (stream NetworkDifficultyResponse);
 }
@@ -57,6 +57,7 @@ message NetworkDifficultyResponse {
     uint64 difficulty = 1;
     uint64 estimated_hash_rate = 2;
     uint64 height = 3;
+    uint64 timestamp = 4;
 }
 
 // A generic single value response for a specific height
@@ -143,6 +144,12 @@ message ConsensusConstants {
     uint64 emission_tail = 12;
     /// This is the initial min difficulty for the difficulty adjustment
     uint64 min_blake_pow_difficulty = 13;
+    /// Block weight for inputs
+    uint64 block_weight_inputs = 14;
+    /// Block weight for output
+    uint64 block_weight_outputs = 15;
+    /// Block weight for kernels
+    uint64 block_weight_kernels = 16;
 }
 
 // The return type of the rpc GetCalcTiming

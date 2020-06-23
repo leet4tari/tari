@@ -23,7 +23,7 @@
 use crate::{
     broadcast_strategy::BroadcastStrategy,
     outbound::{
-        message::SendMessageResponse,
+        message::{SendFailure, SendMessageResponse},
         message_params::FinalSendMessageParams,
         message_send_state::MessageSendState,
         DhtOutboundRequest,
@@ -36,12 +36,15 @@ use futures::{
     stream::Fuse,
     StreamExt,
 };
+use log::*;
 use std::{
     sync::{Arc, Condvar, Mutex, RwLock},
     time::Duration,
 };
 use tari_comms::message::MessageTag;
 use tokio::time::delay_for;
+
+const LOG_TARGET: &str = "mock::outbound_requester";
 
 /// Creates a mock outbound request "handler" for testing purposes.
 ///
@@ -163,6 +166,11 @@ impl OutboundServiceMock {
         while let Some(req) = self.receiver.next().await {
             match req {
                 DhtOutboundRequest::SendMessage(params, body, reply_tx) => {
+                    trace!(
+                        target: LOG_TARGET,
+                        "Send message request received with length of {} bytes",
+                        body.len()
+                    );
                     let behaviour = self.mock_state.get_behaviour();
 
                     match (*params).clone().broadcast_strategy {
@@ -184,9 +192,12 @@ impl OutboundServiceMock {
                                     delay_for(delay).await;
                                     let _ = inner_reply_tx.send(Ok(()));
                                 },
-                                _ => {
+                                resp => {
                                     reply_tx
-                                        .send(SendMessageResponse::Failed)
+                                        .send(SendMessageResponse::Failed(SendFailure::General(format!(
+                                            "Unexpected mock response {:?}",
+                                            resp
+                                        ))))
                                         .expect("Reply channel cancelled");
                                 },
                             };
@@ -198,7 +209,9 @@ impl OutboundServiceMock {
                                 let _ = inner_reply_tx.send(Ok(()));
                             } else {
                                 reply_tx
-                                    .send(SendMessageResponse::Failed)
+                                    .send(SendMessageResponse::Failed(SendFailure::General(
+                                        "Mock broadcast behaviour was not set to Queued".to_string(),
+                                    )))
                                     .expect("Reply channel cancelled");
                             }
                         },
@@ -271,7 +284,7 @@ mod condvar_shim {
 }
 
 /// Define the three response options the mock can respond with.
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ResponseType {
     Queued,
     QueuedFail,

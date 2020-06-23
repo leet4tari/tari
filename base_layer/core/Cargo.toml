@@ -27,8 +27,7 @@ tari_common = { version= "^0.1", path = "../../common"}
 tari_service_framework = { version = "^0.0", path = "../service_framework"}
 tari_p2p = { version = "^0.1", path = "../../base_layer/p2p" }
 tari_comms_dht = { version = "^0.1", path = "../../comms/dht"}
-tari_broadcast_channel = "^0.1"
-tari_pubsub = "^0.1"
+tari_broadcast_channel = "^0.2"
 tari_shutdown = { version = "^0.0", path = "../../infrastructure/shutdown" }
 tari_mmr = { version = "^0.1", path = "../../base_layer/mmr", optional = true }
 randomx-rs = { version = "0.2.1", optional = true }
@@ -39,7 +38,7 @@ digest = "0.8.0"
 derive-error = "0.0.4"
 thiserror = "1.0.15"
 rand = "0.7.2"
-serde = { version = "1.0.97", features = ["derive"] }
+serde = { version = "1.0.106", features = ["derive"] }
 rmp-serde = "0.13.7"
 base64 = "0.10.1"
 serde_json = "1.0"
@@ -51,7 +50,7 @@ log = "0.4"
 blake2 = "^0.8.0"
 uint = { version = "0.8", default-features = false }
 ttl_cache = "0.5.1"
-tokio = { version="^0.2", features = ["blocking", "time"] }
+tokio = { version="^0.2", features = ["blocking", "time", "sync"] }
 futures = {version = "^0.3.1", features = ["async-await"] }
 lmdb-zero = "0.4.4"
 tower-service = { version="0.3.0-alpha.2" }
@@ -60,7 +59,7 @@ prost = "0.6.1"
 bytes = "0.4.12"
 prost-types = "0.6.1"
 cfg-if = "0.1.10"
-croaring = { version = "=0.3.9", optional = true }
+croaring = { version = "=0.4.5", optional = true }
 config = { version = "0.9.3" }
 strum = "0.17.1"
 strum_macros = "0.17.1"

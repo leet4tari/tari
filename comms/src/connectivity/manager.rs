@@ -212,7 +212,7 @@ impl ConnectivityManagerActor {
             AddManagedPeers(node_ids) => {
                 self.add_managed_peers(node_ids).await;
             },
-            RemovePeer(node_id) => match self.remove_peer(&node_id).await {
+            RemovePeer(node_id) => match self.remove_peer(&node_id) {
                 Some(node_id) => {
                     debug!(target: LOG_TARGET, "Removed peer {} from managed pool", node_id);
                 },
@@ -307,6 +307,11 @@ impl ConnectivityManagerActor {
             .pool
             .get_inactive_connections_mut(self.config.reaper_min_inactive_age);
         for conn in connections {
+            // ConnectivityManager MUST NOT disconnect managed peers
+            if self.managed_peers.contains(conn.peer_node_id()) {
+                continue;
+            }
+
             if !conn.is_connected() {
                 continue;
             }
@@ -421,7 +426,7 @@ impl ConnectivityManagerActor {
 
     /// Removes a peer from the managed peers. This does not disconnect the peer, but the peer will be disconnected if
     /// inactive as part of the connection pool refresh procedure
-    async fn remove_peer(&mut self, node_id: &NodeId) -> Option<NodeId> {
+    fn remove_peer(&mut self, node_id: &NodeId) -> Option<NodeId> {
         let pos = self.managed_peers.iter().position(|n| n == node_id)?;
         let removed_peer = self.managed_peers.remove(pos);
         self.update_connectivity_status();
@@ -478,7 +483,7 @@ impl ConnectivityManagerActor {
     ) -> Result<(), ConnectivityError>
     {
         use ConnectionManagerEvent::*;
-        let (node_id, new_status, connection) = match event {
+        let (node_id, mut new_status, connection) = match event {
             PeerDisconnected(node_id) => {
                 self.connection_stats.remove(&node_id);
                 (&**node_id, ConnectionStatus::Disconnected, None)
@@ -505,7 +510,7 @@ impl ConnectivityManagerActor {
 
         let old_status = self.pool.set_status(node_id, new_status);
         if let Some(conn) = connection {
-            self.pool.insert_connection(conn);
+            new_status = self.pool.insert_connection(conn);
         }
         if old_status != new_status {
             debug!(

@@ -46,7 +46,7 @@ use tari_comms_dht::{Dht, DhtBuilder, DhtConfig, DhtInitializationError};
 use tari_storage::{lmdb_store::LMDBBuilder, LMDBWrapper};
 use tower::ServiceBuilder;
 
-const LOG_TARGET: &str = "b::p2p::initialization";
+const LOG_TARGET: &str = "p2p::initialization";
 
 #[derive(Debug, Error)]
 pub enum CommsInitializationError {
@@ -103,7 +103,7 @@ pub struct CommsConfig {
     /// A value of 0 will disallow any liveness sessions.
     pub listener_liveness_max_sessions: usize,
     /// CIDR for addresses allowed to enter into liveness check mode on the listener.
-    pub listener_liveness_whitelist_cidrs: Vec<String>,
+    pub listener_liveness_allowlist_cidrs: Vec<String>,
 }
 
 /// Initialize Tari Comms configured for tests
@@ -125,6 +125,7 @@ where
             .take(8)
             .collect::<String>()
     };
+    std::fs::create_dir_all(data_path).unwrap();
     let datastore = LMDBBuilder::new()
         .set_path(data_path)
         .set_environment_size(50)
@@ -216,7 +217,11 @@ where
             listener_address,
             tor_socks_config,
         } => {
-            debug!(target: LOG_TARGET, "Building TCP comms stack");
+            debug!(
+                target: LOG_TARGET,
+                "Building TCP comms stack{}",
+                tor_socks_config.as_ref().map(|_| " with Tor support").unwrap_or("")
+            );
             let mut transport = TcpWithTorTransport::new();
             if let Some(config) = tor_socks_config {
                 transport.set_tor_socks_proxy(config.clone());
@@ -227,10 +232,7 @@ where
             configure_comms_and_dht(comms, config, connector, seed_peers).await
         },
         TransportType::Tor(tor_config) => {
-            debug!(
-                target: LOG_TARGET,
-                "Building TOR comms stack with configuration: {:?}", tor_config
-            );
+            debug!(target: LOG_TARGET, "Building TOR comms stack ({})", tor_config);
             let hidden_service = initialize_hidden_service(tor_config.clone()).await?;
             debug!(
                 target: LOG_TARGET,
@@ -243,15 +245,12 @@ where
             let (comms, dht) = configure_comms_and_dht(comms, config, connector, seed_peers).await?;
             debug!(target: LOG_TARGET, "DHT configured");
             // Set the public address to the onion address that comms is using
-            comms
-                .node_identity()
-                .set_public_address(
-                    comms
-                        .hidden_service()
-                        .expect("hidden_service must be set because a tor hidden service is set")
-                        .get_onion_address(),
-                )
-                .expect("Poisoned NodeIdentity");
+            comms.node_identity().set_public_address(
+                comms
+                    .hidden_service()
+                    .expect("hidden_service must be set because a tor hidden service is set")
+                    .get_onion_address(),
+            );
             Ok((comms, dht))
         },
         TransportType::Socks {
@@ -305,12 +304,12 @@ where
     let peer_database = datastore.get_handle(&config.peer_database_name).unwrap();
     let peer_database = LMDBWrapper::new(Arc::new(peer_database));
 
-    let listener_liveness_whitelist_cidrs = parse_cidrs(&config.listener_liveness_whitelist_cidrs)
+    let listener_liveness_allowlist_cidrs = parse_cidrs(&config.listener_liveness_allowlist_cidrs)
         .map_err(CommsInitializationError::InvalidLivenessCidrs)?;
 
     let comms = builder
         .with_listener_liveness_max_sessions(config.listener_liveness_max_sessions)
-        .with_listener_liveness_whitelist_cidrs(listener_liveness_whitelist_cidrs)
+        .with_listener_liveness_allowlist_cidrs(listener_liveness_allowlist_cidrs)
         .with_dial_backoff(ConstantBackoff::new(Duration::from_millis(500)))
         .with_peer_storage(peer_database)
         .build()?;

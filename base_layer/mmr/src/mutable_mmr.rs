@@ -103,7 +103,7 @@ where
         Ok((hash, deleted))
     }
 
-    /// Returns the number of leave nodes in the MMR.
+    /// Returns the number of leaf nodes in the MMR.
     pub fn get_leaf_count(&self) -> usize {
         self.size as usize
     }
@@ -133,7 +133,7 @@ where
     }
 
     /// See [MerkleMountainRange::find_leaf_index]
-    pub fn find_leaf_index(&self, hash: &Hash) -> Result<Option<usize>, MerkleMountainRangeError> {
+    pub fn find_leaf_index(&self, hash: &Hash) -> Result<Option<u32>, MerkleMountainRangeError> {
         self.mmr.find_leaf_index(hash)
     }
 

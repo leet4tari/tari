@@ -41,11 +41,12 @@ pub struct GlobalConfig {
     pub network: Network,
     pub comms_transport: CommsTransport,
     pub listnener_liveness_max_sessions: usize,
-    pub listener_liveness_whitelist_cidrs: Vec<String>,
+    pub listener_liveness_allowlist_cidrs: Vec<String>,
     pub data_dir: PathBuf,
     pub db_type: DatabaseType,
     pub orphan_storage_capacity: usize,
     pub pruning_horizon: u64,
+    pub pruned_mode_cleanup_interval: u64,
     pub core_threads: usize,
     pub blocking_threads: usize,
     pub identity_file: PathBuf,
@@ -110,6 +111,11 @@ fn convert_node_config(network: Network, cfg: Config) -> Result<GlobalConfig, Co
 
     let key = config_string(&net_str, "pruning_horizon");
     let pruning_horizon = cfg
+        .get_int(&key)
+        .map_err(|e| ConfigurationError::new(&key, &e.to_string()))? as u64;
+
+    let key = config_string(&net_str, "pruned_mode_cleanup_interval");
+    let pruned_mode_cleanup_interval = cfg
         .get_int(&key)
         .map_err(|e| ConfigurationError::new(&key, &e.to_string()))? as u64;
 
@@ -220,8 +226,8 @@ fn convert_node_config(network: Network, cfg: Config) -> Result<GlobalConfig, Co
         .try_into()
         .map_err(|e: TryFromIntError| ConfigurationError::new(&key, &e.to_string()))?;
 
-    let key = "common.liveness_whitelist_cidrs";
-    let liveness_whitelist_cidrs = cfg
+    let key = "common.liveness_allowlist_cidrs";
+    let liveness_allowlist_cidrs = cfg
         .get_array(key)
         .map(|values| values.iter().map(ToString::to_string).collect())
         .unwrap_or_else(|_| vec!["127.0.0.1/32".to_string()]);
@@ -230,11 +236,12 @@ fn convert_node_config(network: Network, cfg: Config) -> Result<GlobalConfig, Co
         network,
         comms_transport,
         listnener_liveness_max_sessions: liveness_max_sessions,
-        listener_liveness_whitelist_cidrs: liveness_whitelist_cidrs,
+        listener_liveness_allowlist_cidrs: liveness_allowlist_cidrs,
         data_dir,
         db_type,
         orphan_storage_capacity,
         pruning_horizon,
+        pruned_mode_cleanup_interval,
         core_threads,
         blocking_threads,
         identity_file,
@@ -468,7 +475,7 @@ pub enum CommsTransport {
         tor_socks_auth: Option<SocksAuthentication>,
     },
     /// Configures the node to run over a tor hidden service using the Tor proxy. This transport recognises ip/tcp,
-    /// onion v2, onion v3 and dns addresses.
+    /// onion v2, onion v3 and DNS addresses.
     TorHiddenService {
         /// The address of the control server
         control_server_address: Multiaddr,
