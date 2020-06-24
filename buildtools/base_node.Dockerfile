@@ -6,8 +6,9 @@ FROM quay.io/tarilabs/rust_tari-build-with-deps:nightly-2020-06-10 as builder
 ADD . /tari_base_node
 WORKDIR /tari_base_node
 
+ARG TBN_ARCH=native
 RUN rustup component add rustfmt --toolchain nightly-2020-06-10-x86_64-unknown-linux-gnu
-RUN ROARING_ARCH=nehalem RUSTFLAGS="-C target_cpu=nehalem" cargo build -p tari_base_node --release
+RUN env ROARING_ARCH=${TBN_ARCH} RUSTFLAGS="-C target_cpu=${TBN_ARCH}" cargo build -p tari_base_node --release
 
 # Create a base minimal image for adding our executables to
 FROM bitnami/minideb:stretch as base
