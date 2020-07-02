@@ -3,6 +3,7 @@ on:
     branches:
       - 'leet-build*'
 
+name: Multi Platform Builder
 jobs:
   build:
     name: Building Binaries
@@ -57,7 +58,7 @@ jobs:
 #        use-cross: true
         command: build
 #        args: --release --target=${{ matrix.target }}
-        args: --release --verbose tari_base_node
+        args: --release --verbose
     - name: Debug Helper
       continue-on-error: true  # WARNING: only for this example, remove it!
       shell: bash
