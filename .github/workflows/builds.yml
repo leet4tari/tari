@@ -48,7 +48,7 @@ jobs:
       if: matrix.platform == 'windows-latest'
       run: |
         vcpkg.exe install sqlite3:x64-windows zlib:x64-windows
-        choco install llvm tor bzip2
+        choco install tor bzip2
     - name: Build binaries
       continue-on-error: true  # WARNING: only for this example, remove it!
       uses: actions-rs/cargo@v1
