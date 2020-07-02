@@ -25,14 +25,31 @@ jobs:
     # Install OS specific dependencies
     - name: Install Linux dependencies
       if: matrix.platform == 'ubuntu-latest'
-      run: sudo apt-get install re2c
+      run: |
+        sudo apt-get update && \
+        sudo apt-get -y install \
+          openssl \
+          libssl-dev \
+          pkg-config \
+          libsqlite3-dev \
+          git \
+          cmake \
+          libc++-dev \
+          libc++abi-dev \
+          libprotobuf-dev \
+          protobuf-compiler \
+          clang \
+          libclang-dev
     - name: Install macOS dependencies
       if: matrix.platform == 'macOS-latest'
-      run: brew install re2c p7zip cmake
+      run: brew install cmake
     - name: Install Windows dependencies
       if: matrix.platform == 'windows-latest'
-      run: choco install llvm sqlite tor
+      run: |
+        vcpkg.exe install sqlite3:x64-windows zlib:x64-windows
+        choco install llvm tor bzip2
     - name: Build binaries
+      continue-on-error: true  # WARNING: only for this example, remove it!
       uses: actions-rs/cargo@v1
       env:
         CC: gcc
@@ -40,9 +57,10 @@ jobs:
 #        use-cross: true
         command: build
 #        args: --release --target=${{ matrix.target }}
-        args: --release --verbose
-    - shell: bash
+        args: --release --verbose tari_base_node
+    - name: Debug Helper
       continue-on-error: true  # WARNING: only for this example, remove it!
+      shell: bash
       run: |
         ls -la '${{ github.workspace }}'
         ls -la '${{ github.workspace }}/target/release/'
@@ -58,4 +76,4 @@ jobs:
       uses: actions/upload-artifact@v2
       with:
         name: tari_base_node - release - ${{ matrix.platform }}
-        path: '${{ github.workspace }}/target/release/cross-compile-sample'
+        path: '${{ github.workspace }}/target/release/tari_base_node'
