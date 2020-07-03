@@ -52,9 +52,10 @@ jobs:
     - name: Install Windows dependencies
       if: matrix.platform == 'windows-latest'
       run: |
-        vcpkg.exe integrate install
         vcpkg.exe install sqlite3:x64-windows zlib:x64-windows
-        vcpkg.exe list
+        choco upgrade llvm -y
+#        vcpkg.exe integrate install
+#        vcpkg.exe list
 #        vcpkg.exe integrate install
 #        choco install tor bzip2
 #        vcpkg_cli probe -l static sqlite3
