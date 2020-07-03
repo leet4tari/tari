@@ -5,8 +5,8 @@ on:
     branches:
       - 'leet-build*'
 
-env:
-  VCPKGRS_DYNAMIC: 1
+#env:
+#  VCPKGRS_DYNAMIC: 1
 
 jobs:
   build:
@@ -79,7 +79,9 @@ jobs:
       shell: bash
       run: |
         ls -la '${{ github.workspace }}'
-        ls -la 'C:\vcpkg\installed\x86-windows\lib'
+        ls -la 'C:\vcpkg\installed\x64-windows\lib'
+        find 'C:\' -iname sqlite3.lib
+        find 'D:\' -iname sqlite3.lib
 #        ls -la '${{ github.workspace }}/target/release/'
 #        ls -la "${{ github.workspace }}/target/release/"{tari_base_node,tari_base_node.exe}
     - name: Upload Windows binary
