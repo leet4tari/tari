@@ -7,6 +7,8 @@ on:
 
 env:
   SQLITE_STATIC: 1
+  SQLITE3_STATIC: 1
+  SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
 #  VCPKGRS_DYNAMIC: 1
 
 jobs:
