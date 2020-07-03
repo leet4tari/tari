@@ -38,9 +38,7 @@ jobs:
           libc++-dev \
           libc++abi-dev \
           libprotobuf-dev \
-          protobuf-compiler \
-          clang \
-          libclang-dev
+          protobuf-compiler
     - name: Install macOS dependencies
       if: matrix.platform == 'macOS-latest'
       run: brew install cmake
@@ -52,6 +50,7 @@ jobs:
     - name: Build binaries
       continue-on-error: true  # WARNING: only for this example, remove it!
       uses: actions-rs/cargo@v1
+      if: matrix.platform != 'windows-latest'
       env:
         CC: gcc
       with:
