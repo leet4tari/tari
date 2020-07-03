@@ -45,11 +45,12 @@ jobs:
     - name: Install Windows dependencies
       if: matrix.platform == 'windows-latest'
       run: |
-#        choco install tor bzip2
         vcpkg.exe install sqlite3:x64-windows zlib:x64-windows
-#        vcpkg_cli probe -l static sqlite3
         vcpkg.exe list
 #        vcpkg.exe integrate install
+#        choco install tor bzip2
+#        vcpkg_cli probe -l static sqlite3
+
     - name: Build binaries - Nix
       continue-on-error: true  # WARNING: only for this example, remove it!
       if: matrix.platform != 'windows-latest'
