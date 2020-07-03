@@ -1,9 +1,13 @@
+name: Multi Platform Builder
+
 on:
   push:
     branches:
       - 'leet-build*'
 
-name: Multi Platform Builder
+env:
+  VCPKGRS_DYNAMIC: 1
+
 jobs:
   build:
     name: Building Binaries
@@ -45,7 +49,8 @@ jobs:
     - name: Install Windows dependencies
       if: matrix.platform == 'windows-latest'
       run: |
-        vcpkg.exe install sqlite3:x64-windows zlib:x64-windows
+        vcpkg.exe integrate install
+        vcpkg.exe install sqlite3:x64-windows-static sqlite3:x64-windows zlib:x64-windows
         vcpkg.exe list
 #        vcpkg.exe integrate install
 #        choco install tor bzip2
@@ -74,7 +79,8 @@ jobs:
       shell: bash
       run: |
         ls -la '${{ github.workspace }}'
-        ls -la '${{ github.workspace }}/target/release/'
+        ls -la 'C:\vcpkg\installed\x86-windows\lib'
+#        ls -la '${{ github.workspace }}/target/release/'
 #        ls -la "${{ github.workspace }}/target/release/"{tari_base_node,tari_base_node.exe}
     - name: Upload Windows binary
       if: matrix.platform == 'windows-latest'
