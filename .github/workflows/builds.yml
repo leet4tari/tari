@@ -75,13 +75,26 @@ jobs:
 #        find 'D:\' -iname sqlite3.lib
     - name: Build binaries - Nix
       continue-on-error: true  # WARNING: only for this example, remove it!
-      if: matrix.os != 'windows-latest'
-      uses: actions-rs/cargo@v1
+      if: !startsWith(matrix.os,'Windows')
+#      if: matrix.os != 'windows-latest'
       env:
         CC: gcc
-      with:
-        command: build
-        args: --release --features $features
+      run: |
+        cd applications/tari_base_node
+        cargo build --release --bin tari_base_node --features $features
+        mkdir -p $GITHUB_WORKSPACE/binaries/ubuntu
+        cd $GITHUB_WORKSPACE/binaries/ubuntu
+        VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' $GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml)
+        BINFILE=tari_base_node-${{ matrix.os }}-$target_cpu-$features-$VERSION
+        cp $GITHUB_WORKSPACE/target/release/tari_base_node ./$BINFILE
+        bzip2 -f $BINFILE
+        sha256sum $BINFILE.bz2 >> $BINFILE.bz2.sha256
+#      uses: actions-rs/cargo@v1
+#      env:
+#        CC: gcc
+#      with:
+#        command: build
+#        args: --release --features $features
     - name: Build binaries - Windows
       continue-on-error: true  # WARNING: only for this example, remove it!
       if: matrix.os == 'windows-latest'
