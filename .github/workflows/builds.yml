@@ -16,8 +16,8 @@ jobs:
     name: Building Binaries
     strategy:
       matrix:
-        platform: [windows-latest]
-#        platform: [ubuntu-latest, macos-latest, windows-latest]
+#        platform: [windows-latest]
+        platform: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.platform }}
     steps:
     - name: Checkout source code
@@ -59,12 +59,12 @@ jobs:
 #        vcpkg.exe integrate install
 #        choco install tor bzip2
 #        vcpkg_cli probe -l static sqlite3
-    - name: Debug Helper - Top
-      continue-on-error: true  # WARNING: only for this example, remove it!
-      shell: bash
-      run: |
-        ls -la '${{ github.workspace }}'
-        ls -la 'C:\vcpkg\installed\x64-windows\lib'
+#    - name: Debug Helper - Top
+#      continue-on-error: true  # WARNING: only for this example, remove it!
+#      shell: bash
+#      run: |
+#        ls -la '${{ github.workspace }}'
+#        ls -la 'C:\vcpkg\installed\x64-windows\lib'
 #        find 'C:\' -iname sqlite3.lib
 #        find 'D:\' -iname sqlite3.lib
     - name: Build binaries - Nix
@@ -85,27 +85,28 @@ jobs:
 #        RUSTFLAGS: '-Ctarget-feature=+crt-static'
       with:
         command: build
-        args: --release --verbose
-    - name: Debug Helper - Bottom
-      continue-on-error: true  # WARNING: only for this example, remove it!
-      shell: bash
-      run: |
-        ls -la '${{ github.workspace }}'
-        ls -la 'C:\vcpkg\installed\x64-windows\lib'
-        ls -la '${{ github.workspace }}/target/release/'
+        args: --release
+#        args: --release --verbose
+#    - name: Debug Helper - Bottom
+#      continue-on-error: true  # WARNING: only for this example, remove it!
+#      shell: bash
+#      run: |
+#        ls -la '${{ github.workspace }}'
+#        ls -la 'C:\vcpkg\installed\x64-windows\lib'
+#        ls -la '${{ github.workspace }}/target/release/'
 #        find 'C:\' -iname sqlite3.lib
 #        find 'D:\' -iname sqlite3.lib
 #        ls -la '${{ github.workspace }}/target/release/'
 #        ls -la "${{ github.workspace }}/target/release/"{tari_base_node,tari_base_node.exe}
-    - name: Upload Windows binary
-      if: matrix.platform == 'windows-latest'
-      uses: actions/upload-artifact@v2
-      with:
-        name: tari_base_node - release - ${{ matrix.platform }}
-        path: '${{ github.workspace }}/target/release/tari_base_node.exe'
     - name: Upload Nix binary
       if: matrix.platform != 'windows-latest'
       uses: actions/upload-artifact@v2
       with:
         name: tari_base_node - release - ${{ matrix.platform }}
         path: '${{ github.workspace }}/target/release/tari_base_node'
+    - name: Upload Windows binary
+      if: matrix.platform == 'windows-latest'
+      uses: actions/upload-artifact@v2
+      with:
+        name: tari_base_node - release - ${{ matrix.platform }}
+        path: '${{ github.workspace }}/target/release/tari_base_node.exe'
