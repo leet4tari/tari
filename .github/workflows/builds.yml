@@ -5,7 +5,8 @@ on:
     branches:
       - 'leet-build*'
 
-#env:
+env:
+  SQLITE_STATIC: 1
 #  VCPKGRS_DYNAMIC: 1
 
 jobs:
@@ -55,7 +56,14 @@ jobs:
 #        vcpkg.exe integrate install
 #        choco install tor bzip2
 #        vcpkg_cli probe -l static sqlite3
-
+    - name: Debug Helper - Top
+      continue-on-error: true  # WARNING: only for this example, remove it!
+      shell: bash
+      run: |
+        ls -la '${{ github.workspace }}'
+        ls -la 'C:\vcpkg\installed\x64-windows\lib'
+#        find 'C:\' -iname sqlite3.lib
+#        find 'D:\' -iname sqlite3.lib
     - name: Build binaries - Nix
       continue-on-error: true  # WARNING: only for this example, remove it!
       if: matrix.platform != 'windows-latest'
@@ -69,8 +77,8 @@ jobs:
       continue-on-error: true  # WARNING: only for this example, remove it!
       if: matrix.platform == 'windows-latest'
       uses: actions-rs/cargo@v1
-      env:
-        RUSTFLAGS: '-Ctarget-feature=+crt-static'
+#      env:
+#        RUSTFLAGS: '-Ctarget-feature=+crt-static'
       with:
         command: build
         args: --release --verbose
@@ -80,8 +88,8 @@ jobs:
       run: |
         ls -la '${{ github.workspace }}'
         ls -la 'C:\vcpkg\installed\x64-windows\lib'
-        find 'C:\' -iname sqlite3.lib
-        find 'D:\' -iname sqlite3.lib
+#        find 'C:\' -iname sqlite3.lib
+#        find 'D:\' -iname sqlite3.lib
 #        ls -la '${{ github.workspace }}/target/release/'
 #        ls -la "${{ github.workspace }}/target/release/"{tari_base_node,tari_base_node.exe}
     - name: Upload Windows binary
