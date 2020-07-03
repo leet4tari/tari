@@ -6,10 +6,10 @@ on:
       - 'leet-build*'
 
 env:
-  SQLITE_STATIC: 1
-  SQLITE3_STATIC: 1
   SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
 #  VCPKGRS_DYNAMIC: 1
+#  SQLITE_STATIC: 1
+#  SQLITE3_STATIC: 1
 
 jobs:
   build:
@@ -53,7 +53,7 @@ jobs:
       if: matrix.platform == 'windows-latest'
       run: |
         vcpkg.exe integrate install
-        vcpkg.exe install sqlite3:x64-windows-static sqlite3:x64-windows zlib:x64-windows
+        vcpkg.exe install sqlite3:x64-windows zlib:x64-windows
         vcpkg.exe list
 #        vcpkg.exe integrate install
 #        choco install tor bzip2
