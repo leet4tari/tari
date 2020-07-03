@@ -45,18 +45,22 @@ jobs:
     - name: Install Windows dependencies
       if: matrix.platform == 'windows-latest'
       run: |
-        vcpkg.exe install sqlite3:x64-windows zlib:x64-windows
         choco install tor bzip2
+        vcpkg.exe install sqlite3:x64-windows zlib:x64-windows
+        vcpkg.exe integrate install
     - name: Build binaries
       continue-on-error: true  # WARNING: only for this example, remove it!
-      uses: actions-rs/cargo@v1
       if: matrix.platform != 'windows-latest'
+      uses: actions-rs/cargo@v1
       env:
         CC: gcc
       with:
-#        use-cross: true
         command: build
-#        args: --release --target=${{ matrix.target }}
+        args: --release --verbose
+      if: matrix.platform == 'windows-latest'
+      uses: actions-rs/cargo@v1
+      with:
+        command: build
         args: --release --verbose
     - name: Debug Helper
       continue-on-error: true  # WARNING: only for this example, remove it!
