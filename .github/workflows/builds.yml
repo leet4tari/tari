@@ -5,8 +5,8 @@ on:
     branches:
       - 'leet-build*'
 
-env:
-  SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
+#env:
+#  SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
 #  VCPKGRS_DYNAMIC: 1
 #  SQLITE_STATIC: 1
 #  SQLITE3_STATIC: 1
@@ -80,17 +80,19 @@ jobs:
       continue-on-error: true  # WARNING: only for this example, remove it!
       if: matrix.platform == 'windows-latest'
       uses: actions-rs/cargo@v1
-#      env:
+      env:
+        SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
 #        RUSTFLAGS: '-Ctarget-feature=+crt-static'
       with:
         command: build
         args: --release --verbose
-    - name: Debug Helper
+    - name: Debug Helper - Bottom
       continue-on-error: true  # WARNING: only for this example, remove it!
       shell: bash
       run: |
         ls -la '${{ github.workspace }}'
         ls -la 'C:\vcpkg\installed\x64-windows\lib'
+        ls -la '${{ github.workspace }}/target/release/'
 #        find 'C:\' -iname sqlite3.lib
 #        find 'D:\' -iname sqlite3.lib
 #        ls -la '${{ github.workspace }}/target/release/'
