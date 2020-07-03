@@ -19,10 +19,10 @@ jobs:
     name: Building Binaries
     strategy:
       matrix:
-#        platform: [windows-latest]
-#        platform: [ubuntu-latest, macos-latest, windows-latest]
-        platform: [ubuntu-18.04]
-    runs-on: ${{ matrix.platform }}
+#        os: [windows-latest]
+#        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-18.04]
+    runs-on: ${{ matrix.os }}
     steps:
     - name: Checkout source code
       uses: actions/checkout@v2
@@ -36,7 +36,9 @@ jobs:
         override: true
     # Install OS specific dependencies
     - name: Install Linux dependencies
-      if: matrix.platform == 'ubuntu-latest'
+      if: startsWith(matrix.os,'ubuntu')
+#      if: runner.os != 'Windows'
+#      if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt-get update && \
         sudo apt-get -y install \
@@ -51,10 +53,10 @@ jobs:
           libprotobuf-dev \
           protobuf-compiler
     - name: Install macOS dependencies
-      if: matrix.platform == 'macOS-latest'
+      if: matrix.os == 'macOS-latest'
       run: brew install cmake
     - name: Install Windows dependencies
-      if: matrix.platform == 'windows-latest'
+      if: matrix.os == 'windows-latest'
       run: |
         vcpkg.exe install sqlite3:x64-windows zlib:x64-windows
         choco upgrade llvm -y
@@ -73,7 +75,7 @@ jobs:
 #        find 'D:\' -iname sqlite3.lib
     - name: Build binaries - Nix
       continue-on-error: true  # WARNING: only for this example, remove it!
-      if: matrix.platform != 'windows-latest'
+      if: matrix.os != 'windows-latest'
       uses: actions-rs/cargo@v1
       env:
         CC: gcc
@@ -82,7 +84,7 @@ jobs:
         args: --release --features $features
     - name: Build binaries - Windows
       continue-on-error: true  # WARNING: only for this example, remove it!
-      if: matrix.platform == 'windows-latest'
+      if: matrix.os == 'windows-latest'
       uses: actions-rs/cargo@v1
       env:
         SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
@@ -104,14 +106,14 @@ jobs:
 #        ls -la "${{ github.workspace }}/target/release/"{tari_base_node,tari_base_node.exe}
     - name: Upload Nix binary
       if: runner.os != 'Windows'
-#      if: matrix.platform != 'windows-latest'
+#      if: matrix.os != 'windows-latest'
       uses: actions/upload-artifact@v2
       with:
-        name: tari_base_node - release - ${{ matrix.platform }} - $target_cpu - $features
+        name: tari_base_node - release - ${{ matrix.os }} - $target_cpu - $features
         path: '${{ github.workspace }}/target/release/tari_base_node'
     - name: Upload Windows binary
-      if: matrix.platform == 'windows-latest'
+      if: matrix.os == 'windows-latest'
       uses: actions/upload-artifact@v2
       with:
-        name: tari_base_node - release - ${{ matrix.platform }}
+        name: tari_base_node - release - ${{ matrix.os }}
         path: '${{ github.workspace }}/target/release/tari_base_node.exe'
