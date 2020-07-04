@@ -26,6 +26,18 @@ jobs:
     steps:
     - name: Checkout source code
       uses: actions/checkout@v2
+
+    - name: Pre - Prep
+      continue-on-error: true  # WARNING: only for this example, remove it!
+      shell: bash
+      run: |
+        printenv
+        mkdir -p "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
+        cd "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
+        VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' "$GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml)"
+        BINFILE="tari_base_node-${{ matrix.os }}-$target_cpu-$features-$VERSION"
+        echo "Filename is $BINFILE"
+
     - name: Setup Rust toolchain
       uses: actions-rs/toolchain@v1
       with:
@@ -65,30 +77,35 @@ jobs:
       uses: allenevans/set-env@v1.0.0
       with:
         CC: gcc
+        TBN_FILENAME: 'tari_base_node'
     - name: set environment variables - Windows
       continue-on-error: true  # WARNING: only for this example, remove it!
       if: startsWith(matrix.os,'Windows')
       uses: allenevans/set-env@v1.0.0
       with:
         SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
+        TBN_FILENAME: 'tari_base_node.exe'
 #        RUSTFLAGS: '-Ctarget-feature=+crt-static'
 #        CC: gcc
 
     - name: Build binaries
       continue-on-error: true  # WARNING: only for this example, remove it!
-#      if: "!startsWith(matrix.os,'Windows')"
-#      env:
-#        CC: gcc
       run: |
         printenv
         cd applications/tari_base_node
         cargo build --release --bin tari_base_node --features $features
+
+    - name: Prep binaries
+      continue-on-error: true  # WARNING: only for this example, remove it!
+      shell: bash
+      run: |
+        printenv
         mkdir -p "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
         cd "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
         VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' "$GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml)"
-        BINFILE="tari_base_node-${{ matrix.os }}-$ {{ env.target_cpu }}-${{ env.features }}-$VERSION"
+        BINFILE="tari_base_node-${{ matrix.os }}-$target_cpu-$features-$VERSION"
         echo "Filename is $BINFILE"
-        cp "$GITHUB_WORKSPACE/target/release/tari_base_node" ./$BINFILE
+        cp -v "$GITHUB_WORKSPACE/target/release/tari_base_node" ./$BINFILE
 #        bzip2 -f $BINFILE
 #        sha256sum $BINFILE.bz2 >> $BINFILE.bz2.sha256
     - name: Upload Nix binary
