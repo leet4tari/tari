@@ -35,7 +35,6 @@ jobs:
 #        target: ${{ matrix.target }}
         override: true
 
-    # Install OS specific dependencies
     - name: Install Linux dependencies
       if: startsWith(matrix.os,'ubuntu')
       run: |
@@ -59,36 +58,25 @@ jobs:
       run: |
         vcpkg.exe install sqlite3:x64-windows zlib:x64-windows
         choco upgrade llvm -y
-#        vcpkg.exe integrate install
-#        vcpkg.exe list
-#        vcpkg.exe integrate install
-#        choco install tor bzip2
-#        vcpkg_cli probe -l static sqlite3
-#    - name: Debug Helper - Top
-#      continue-on-error: true  # WARNING: only for this example, remove it!
-#      shell: bash
-#      run: |
-#        ls -la '${{ github.workspace }}'
-#        ls -la 'C:\vcpkg\installed\x64-windows\lib'
-#        find 'C:\' -iname sqlite3.lib
-#        find 'D:\' -iname sqlite3.lib
+
     - name: Build binaries - Nix
-#      continue-on-error: true  # WARNING: only for this example, remove it!
+      continue-on-error: true  # WARNING: only for this example, remove it!
       if: "!startsWith(matrix.os,'Windows')"
       env:
         CC: gcc
       run: |
         cd applications/tari_base_node
         cargo build --release --bin tari_base_node --features $features
-        mkdir -p $GITHUB_WORKSPACE/binaries/ubuntu
-        cd $GITHUB_WORKSPACE/binaries/ubuntu
+        mkdir -p '$GITHUB_WORKSPACE/binaries/${{ matrix.os }}'
+        cd '$GITHUB_WORKSPACE/binaries/${{ matrix.os }}'
         VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' $GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml)
-        BINFILE=tari_base_node-${{ matrix.os }}-$target_cpu-$features-$VERSION
-        cp $GITHUB_WORKSPACE/target/release/tari_base_node ./$BINFILE
-        bzip2 -f $BINFILE
-        sha256sum $BINFILE.bz2 >> $BINFILE.bz2.sha256
+        BINFILE='tari_base_node-${{ matrix.os }}-$ {{ env.target_cpu }}-${{ env.features }}-$VERSION'
+        echo 'Filename is $BINFILE'
+        cp '$GITHUB_WORKSPACE/target/release/tari_base_node' ./$BINFILE
+#        bzip2 -f $BINFILE
+#        sha256sum $BINFILE.bz2 >> $BINFILE.bz2.sha256
     - name: Build binaries - Windows
-#      continue-on-error: true  # WARNING: only for this example, remove it!
+      continue-on-error: true  # WARNING: only for this example, remove it!
       if: startsWith(matrix.os,'Windows')
       env:
         SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
@@ -98,13 +86,14 @@ jobs:
       run: |
         cd applications/tari_base_node
         cargo build --release --bin tari_base_node --features $features
-        mkdir -p $GITHUB_WORKSPACE/binaries/ubuntu
-        cd $GITHUB_WORKSPACE/binaries/ubuntu
+        mkdir -p '$GITHUB_WORKSPACE/binaries/${{ matrix.os }}'
+        cd '$GITHUB_WORKSPACE/binaries/${{ matrix.os }}'
         VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' $GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml)
-        BINFILE=tari_base_node-${{ matrix.os }}-$target_cpu-$features-$VERSION
-        cp $GITHUB_WORKSPACE/target/release/tari_base_node ./$BINFILE
-        bzip2 -f $BINFILE
-        sha256sum $BINFILE.bz2 >> $BINFILE.bz2.sha256
+        BINFILE='tari_base_node-${{ matrix.os }}-$ {{ env.target_cpu }}-${{ env.features }}-$VERSION'
+        echo 'Filename is $BINFILE'
+        cp '$GITHUB_WORKSPACE/target/release/tari_base_node' ./$BINFILE
+#        bzip2 -f $BINFILE
+#        sha256sum $BINFILE.bz2 >> $BINFILE.bz2.sha256
 #    - name: Build binaries - Nix
 #      if: "!startsWith(matrix.os,'Windows')"
 #      uses: actions-rs/cargo@v1
