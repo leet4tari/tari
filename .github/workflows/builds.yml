@@ -34,7 +34,7 @@ jobs:
         printenv
         mkdir -p "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
         cd "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
-        VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' "$GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml)"
+        VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' "$GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml")
         BINFILE="tari_base_node-${{ matrix.os }}-$target_cpu-$features-$VERSION"
         echo "Filename is $BINFILE"
 
@@ -90,6 +90,7 @@ jobs:
 
     - name: Build binaries
       continue-on-error: true  # WARNING: only for this example, remove it!
+      shell: bash
       run: |
         printenv
         cd applications/tari_base_node
@@ -102,7 +103,7 @@ jobs:
         printenv
         mkdir -p "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
         cd "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
-        VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' "$GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml)"
+        VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' "$GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml")
         BINFILE="tari_base_node-${{ matrix.os }}-$target_cpu-$features-$VERSION"
         echo "Filename is $BINFILE"
         cp -v "$GITHUB_WORKSPACE/target/release/tari_base_node" ./$BINFILE
