@@ -119,11 +119,11 @@ jobs:
       if: runner.os != 'Windows'
       uses: actions/upload-artifact@v2
       with:
-        name: tari_base_node - release - ${{ matrix.os }} - ${{ $target_cpu }} - ${{ $features }}
+        name: tari_base_node - release - ${{ matrix.os }} - ${{ env.target_cpu }} - ${{ env.features }}
         path: '${{ github.workspace }}/target/release/tari_base_node'
     - name: Upload Windows binary
       if: matrix.os == 'Windows'
       uses: actions/upload-artifact@v2
       with:
-        name: tari_base_node - release - ${{ matrix.os }} - ${{ $target_cpu }} - ${{ $features }}
+        name: tari_base_node - release - ${{ matrix.os }} - ${{ env.target_cpu }} - ${{ env.features }}
         path: '${{ github.workspace }}/target/release/tari_base_node.exe'
