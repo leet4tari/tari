@@ -73,7 +73,7 @@ jobs:
 #        find 'C:\' -iname sqlite3.lib
 #        find 'D:\' -iname sqlite3.lib
     - name: Build binaries - Nix
-      continue-on-error: true  # WARNING: only for this example, remove it!
+#      continue-on-error: true  # WARNING: only for this example, remove it!
       if: "!startsWith(matrix.os,'Windows')"
       env:
         CC: gcc
@@ -87,22 +87,42 @@ jobs:
         cp $GITHUB_WORKSPACE/target/release/tari_base_node ./$BINFILE
         bzip2 -f $BINFILE
         sha256sum $BINFILE.bz2 >> $BINFILE.bz2.sha256
+    - name: Build binaries - Windows
+#      continue-on-error: true  # WARNING: only for this example, remove it!
+      if: startsWith(matrix.os,'Windows')
+      env:
+        SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
+#        RUSTFLAGS: '-Ctarget-feature=+crt-static'
+#        CC: gcc
+      shell: bash
+      run: |
+        cd applications/tari_base_node
+        cargo build --release --bin tari_base_node --features $features
+        mkdir -p $GITHUB_WORKSPACE/binaries/ubuntu
+        cd $GITHUB_WORKSPACE/binaries/ubuntu
+        VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' $GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml)
+        BINFILE=tari_base_node-${{ matrix.os }}-$target_cpu-$features-$VERSION
+        cp $GITHUB_WORKSPACE/target/release/tari_base_node ./$BINFILE
+        bzip2 -f $BINFILE
+        sha256sum $BINFILE.bz2 >> $BINFILE.bz2.sha256
+#    - name: Build binaries - Nix
+#      if: "!startsWith(matrix.os,'Windows')"
 #      uses: actions-rs/cargo@v1
 #      env:
 #        CC: gcc
 #      with:
 #        command: build
 #        args: --release --features $features
-    - name: Build binaries - Windows
-      continue-on-error: true  # WARNING: only for this example, remove it!
-      if: startsWith(matrix.os,'Windows')
-      uses: actions-rs/cargo@v1
-      env:
-        SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
-#        RUSTFLAGS: '-Ctarget-feature=+crt-static'
-      with:
-        command: build
-        args: --release
+#    - name: Build binaries - Windows
+#      continue-on-error: true  # WARNING: only for this example, remove it!
+#      if: startsWith(matrix.os,'Windows')
+#      uses: actions-rs/cargo@v1
+#      env:
+#        SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
+##        RUSTFLAGS: '-Ctarget-feature=+crt-static'
+#      with:
+#        command: build
+#        args: --release
 #        args: --release --verbose
 #    - name: Debug Helper - Bottom
 #      continue-on-error: true  # WARNING: only for this example, remove it!
@@ -122,7 +142,7 @@ jobs:
         name: tari_base_node - release - ${{ matrix.os }} - ${{ env.target_cpu }} - ${{ env.features }}
         path: '${{ github.workspace }}/target/release/tari_base_node'
     - name: Upload Windows binary
-      if: matrix.os == 'Windows'
+      if: runner.os == 'Windows'
       uses: actions/upload-artifact@v2
       with:
         name: tari_base_node - release - ${{ matrix.os }} - ${{ env.target_cpu }} - ${{ env.features }}
