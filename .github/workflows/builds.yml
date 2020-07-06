@@ -9,6 +9,7 @@ env:
   target_cpu: "x86-64"
   RUSTFLAGS: "-C target_cpu=x86-64"
   features: "safe"
+  TBN_FILENAME: 'tari_base_node'
 #  SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
 #  VCPKGRS_DYNAMIC: 1
 #  SQLITE_STATIC: 1
@@ -26,17 +27,6 @@ jobs:
     steps:
     - name: Checkout source code
       uses: actions/checkout@v2
-
-    - name: Pre - Prep
-      continue-on-error: true  # WARNING: only for this example, remove it!
-      shell: bash
-      run: |
-        printenv
-        mkdir -p "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
-        cd "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
-        VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' "$GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml")
-        BINFILE="tari_base_node-${{ matrix.os }}-$target_cpu-$features-$VERSION"
-        echo "Filename is $BINFILE"
 
     - name: Setup Rust toolchain
       uses: actions-rs/toolchain@v1
@@ -58,18 +48,19 @@ jobs:
           libsqlite3-dev \
           git \
           cmake \
+          zip \
           libc++-dev \
           libc++abi-dev \
           libprotobuf-dev \
           protobuf-compiler
     - name: Install macOS dependencies
       if: startsWith(matrix.os,'macos')
-      run: brew install cmake
+      run: brew install cmake zip
     - name: Install Windows dependencies
       if: startsWith(matrix.os,'windows')
       run: |
         vcpkg.exe install sqlite3:x64-windows zlib:x64-windows
-        choco upgrade llvm -y
+        choco upgrade llvm zip -y
 
     - name: set environment variables - Nix
       continue-on-error: true  # WARNING: only for this example, remove it!
@@ -88,6 +79,18 @@ jobs:
 #        RUSTFLAGS: '-Ctarget-feature=+crt-static'
 #        CC: gcc
 
+    - name: Pre - Prep
+      continue-on-error: true  # WARNING: only for this example, remove it!
+      shell: bash
+      run: |
+        printenv
+        mkdir -p "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
+        cd "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
+        VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' "$GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml")
+        BINFILE="${TBN_FILENAME}-${{ matrix.os }}-${target_cpu}-${features}-${VERSION}"
+        echo "Filename is $BINFILE"
+        printenv
+
     - name: Build binaries
       continue-on-error: true  # WARNING: only for this example, remove it!
       shell: bash
@@ -104,20 +107,15 @@ jobs:
         mkdir -p "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
         cd "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
         VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' "$GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml")
-        BINFILE="tari_base_node-${{ matrix.os }}-$target_cpu-$features-$VERSION"
+        BINFILE="${TBN_FILENAME}-${{ matrix.os }}-${target_cpu}-${features}-${VERSION}"
         echo "Filename is $BINFILE"
-        cp -v "$GITHUB_WORKSPACE/target/release/tari_base_node" ./$BINFILE
-#        bzip2 -f $BINFILE
-#        sha256sum $BINFILE.bz2 >> $BINFILE.bz2.sha256
-    - name: Upload Nix binary
-      if: runner.os != 'Windows'
+        cp -v "$GITHUB_WORKSPACE/target/release/${TBN_FILENAME}" ./$BINFILE
+        zip -j "${BINFILE}".zip" ${BINFILE}
+        shasum -a 256 "${BINFILE}.zip" ${BINFILE} >> "${BINFILE}.zip.sha256"
+        shasum -a 256 --check "${BINFILE}.zip.sha256"
+        printenv
+    - name: Upload binary
       uses: actions/upload-artifact@v2
       with:
-        name: tari_base_node - release - ${{ matrix.os }} - ${{ env.target_cpu }} - ${{ env.features }}
-        path: '${{ github.workspace }}/target/release/tari_base_node'
-    - name: Upload Windows binary
-      if: runner.os == 'Windows'
-      uses: actions/upload-artifact@v2
-      with:
-        name: tari_base_node - release - ${{ matrix.os }} - ${{ env.target_cpu }} - ${{ env.features }}
-        path: '${{ github.workspace }}/target/release/tari_base_node.exe'
+        name: ${{ env.TBN_FILENAME }} - release - ${{ matrix.os }} - ${{ env.target_cpu }} - ${{ env.features }}
+        path: '${{ github.workspace }}/target/release/${{ env.TBN_FILENAME }}'
