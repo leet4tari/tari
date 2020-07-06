@@ -60,7 +60,7 @@ jobs:
       if: startsWith(matrix.os,'windows')
       run: |
         vcpkg.exe install sqlite3:x64-windows zlib:x64-windows
-        choco upgrade llvm zip -y
+        choco upgrade llvm zip psutils -y
 
     - name: set environment variables - Nix
       continue-on-error: true  # WARNING: only for this example, remove it!
