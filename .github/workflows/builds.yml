@@ -9,7 +9,7 @@ env:
   target_cpu: "x86-64"
   RUSTFLAGS: "-C target_cpu=x86-64"
   features: "safe"
-  TBN_FILENAME: 'tari_base_node'
+#  TBN_FILENAME: 'tari_base_node'
 #  SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
 #  VCPKGRS_DYNAMIC: 1
 #  SQLITE_STATIC: 1
@@ -67,6 +67,7 @@ jobs:
       if: "!startsWith(matrix.os,'Windows')"
       uses: allenevans/set-env@v1.0.0
       with:
+        overwrite: true
         CC: gcc
         TBN_FILENAME: 'tari_base_node'
     - name: set environment variables - Windows
@@ -74,6 +75,7 @@ jobs:
       if: startsWith(matrix.os,'Windows')
       uses: allenevans/set-env@v1.0.0
       with:
+        overwrite: true
         SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
         TBN_FILENAME: 'tari_base_node.exe'
 #        RUSTFLAGS: '-Ctarget-feature=+crt-static'
@@ -109,8 +111,8 @@ jobs:
         VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' "$GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml")
         BINFILE="${TBN_FILENAME}-${{ matrix.os }}-${target_cpu}-${features}-${VERSION}"
         echo "Filename is $BINFILE"
-        cp -v "$GITHUB_WORKSPACE/target/release/${TBN_FILENAME}" ./$BINFILE
-        zip -j "${BINFILE}".zip" ${BINFILE}
+        cp -v "$GITHUB_WORKSPACE/target/release/${TBN_FILENAME}" "./$BINFILE"
+        zip -j "${BINFILE}.zip" "${BINFILE}"
         shasum -a 256 "${BINFILE}.zip" ${BINFILE} >> "${BINFILE}.zip.sha256"
         shasum -a 256 --check "${BINFILE}.zip.sha256"
         printenv
