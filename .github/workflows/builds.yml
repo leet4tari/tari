@@ -5,24 +5,22 @@ on:
     branches:
       - 'leet-build*'
 
-env:
-  target_cpu: "x86-64"
-  RUSTFLAGS: "-C target_cpu=x86-64"
-  features: "safe"
-#  TBN_FILENAME: 'tari_base_node'
-#  SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
-#  VCPKGRS_DYNAMIC: 1
-#  SQLITE_STATIC: 1
-#  SQLITE3_STATIC: 1
-
 jobs:
   build:
     name: Building Binaries
     strategy:
+      fail-fast: false
       matrix:
-#        os: [windows-latest]
-#        os: [ubuntu-latest, macos-latest, windows-latest]
+#        os: [ubuntu-latest, macos-latest, windows-latest, seelf-hosted]
         os: [ubuntu-18.04, macos-10.15, windows-2019]
+        features: ["avx2", "safe"]
+#        target_cpu: ["x86-64", "ivybridge", "skylake"]
+        target_cpu: ["x86-64", "ivybridge"]
+#        target_release: ["release", "debug"]
+        exclude:
+          - target_cpu: "x86-64"
+            features: "avx2"
+
     runs-on: ${{ matrix.os }}
     steps:
     - name: Checkout source code
@@ -69,7 +67,7 @@ jobs:
         overwrite: true
         CC: gcc
         TBN_FILENAME: 'tari_base_node'
-        SHARUN: 'shasum -a 256'
+        SHARUN: 'shasum --portable --algorithm 256'
     - name: set environment variables - Windows
       if: startsWith(matrix.os,'Windows')
       uses: allenevans/set-env@v1.0.0
@@ -77,25 +75,30 @@ jobs:
         overwrite: true
         SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
         TBN_FILENAME: 'tari_base_node.exe'
-        SHARUN: 'pwsh C:\ProgramData\chocolatey\lib\psutils\tools\psutils-master\shasum.ps1 -a 256'
+        SHARUN: 'pwsh C:\ProgramData\chocolatey\lib\psutils\tools\psutils-master\shasum.ps1 --portable --algorithm 256'
 #        RUSTFLAGS: '-Ctarget-feature=+crt-static'
 #        CC: gcc
 
     - name: Build binaries
       continue-on-error: true  # WARNING: only for this example, remove it!
+      env:
+        RUSTFLAGS: '-C target_cpu=${{ matrix.target_cpu }}'
+        ROARING_ARCH: '${{ matrix.target_cpu }}'
       shell: bash
       run: |
         cd applications/tari_base_node
-        cargo build --release --bin tari_base_node --features $features
+        cargo build --release --bin tari_base_node --features ${{ matrix.features}}
 
     - name: Prep binaries
       continue-on-error: true  # WARNING: only for this example, remove it!
       shell: bash
       run: |
-        mkdir -p "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
-        cd "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
+        mkdir -p "$GITHUB_WORKSPACE/binaries/"
+        cd "$GITHUB_WORKSPACE/binaries/"
         VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' "$GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml")
-        BINFILE="${TBN_FILENAME}-${{ matrix.os }}-${target_cpu}-${features}-${VERSION}"
+        echo ::set-env name=VERSION::${VERSION}
+        BINFILE="${TBN_FILENAME}-${{ matrix.os }}-${{ matrix.target_cpu }}-${{ matrix.features }}-${VERSION}"
+        echo ::set-env name=BINFILE::${BINFILE}
         echo "Copying file ${BINFILE} too $(pwd)"
         cp -v "$GITHUB_WORKSPACE/target/release/${TBN_FILENAME}" "./${BINFILE}"
         echo "Archive ${BINFILE} too ${BINFILE}.zip"
@@ -110,5 +113,5 @@ jobs:
     - name: Upload binary
       uses: actions/upload-artifact@v2
       with:
-        name: ${{ env.TBN_FILENAME }} - release - ${{ matrix.os }} - ${{ env.target_cpu }} - ${{ env.features }}
-        path: '${{ github.workspace }}/target/release/${{ env.TBN_FILENAME }}'
+        name: ${{ env.VERSION  }} - release - ${{ matrix.os }} ${{ matrix.target_cpu }} ${{ matrix.features }}
+        path: '${{ github.workspace }}/binaries/${{ env.BINFILE }}.zip*'
