@@ -67,15 +67,19 @@ jobs:
         overwrite: true
         CC: gcc
         TBN_FILENAME: 'tari_base_node'
-        SHARUN: 'shasum --portable --algorithm 256'
+        TBN_EXT: ''
+        SHARUN: 'shasum --algorithm 256'
+#        SHARUN: 'shasum --portable --algorithm 256'
     - name: set environment variables - Windows
       if: startsWith(matrix.os,'Windows')
       uses: allenevans/set-env@v1.0.0
       with:
         overwrite: true
         SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
-        TBN_FILENAME: 'tari_base_node.exe'
-        SHARUN: 'pwsh C:\ProgramData\chocolatey\lib\psutils\tools\psutils-master\shasum.ps1 --portable --algorithm 256'
+        TBN_FILENAME: 'tari_base_node'
+        TBN_EXT: '.exe'
+        SHARUN: 'pwsh C:\ProgramData\chocolatey\lib\psutils\tools\psutils-master\shasum.ps1 --algorithm 256'
+#        SHARUN: 'pwsh C:\ProgramData\chocolatey\lib\psutils\tools\psutils-master\shasum.ps1 --portable --algorithm 256'
 #        RUSTFLAGS: '-Ctarget-feature=+crt-static'
 #        CC: gcc
 
@@ -93,14 +97,14 @@ jobs:
       continue-on-error: true  # WARNING: only for this example, remove it!
       shell: bash
       run: |
-        mkdir -p "$GITHUB_WORKSPACE/binaries/"
-        cd "$GITHUB_WORKSPACE/binaries/"
+        mkdir -p "$GITHUB_WORKSPACE/dist/"
+        cd "$GITHUB_WORKSPACE/dist/"
         VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' "$GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml")
         echo ::set-env name=VERSION::${VERSION}
-        BINFILE="${TBN_FILENAME}-${{ matrix.os }}-${{ matrix.target_cpu }}-${{ matrix.features }}-${VERSION}"
+        BINFILE="${TBN_FILENAME}-${{ matrix.os }}-${{ matrix.target_cpu }}-${{ matrix.features }}-${VERSION}${TBN_EXT}"
         echo ::set-env name=BINFILE::${BINFILE}
         echo "Copying file ${BINFILE} too $(pwd)"
-        cp -v "$GITHUB_WORKSPACE/target/release/${TBN_FILENAME}" "./${BINFILE}"
+        cp -v "$GITHUB_WORKSPACE/target/release/${TBN_FILENAME}${TBN_EXT}" "./${BINFILE}"
         echo "Archive ${BINFILE} too ${BINFILE}.zip"
         zip -j "${BINFILE}.zip" "${BINFILE}"
         echo "Compute shasum"
@@ -113,5 +117,5 @@ jobs:
     - name: Upload binary
       uses: actions/upload-artifact@v2
       with:
-        name: ${{ env.VERSION  }} - release - ${{ matrix.os }} ${{ matrix.target_cpu }} ${{ matrix.features }}
-        path: '${{ github.workspace }}/binaries/${{ env.BINFILE }}.zip*'
+        name: ${{ env.TBN_FILENAME }} - ${{ env.VERSION }} - release - ${{ matrix.os }} ${{ matrix.target_cpu }} ${{ matrix.features }}
+        path: '${{ github.workspace }}/dist/${{ env.BINFILE }}.zip*'
