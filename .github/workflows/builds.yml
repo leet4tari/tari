@@ -37,7 +37,7 @@ jobs:
 #        target: ${{ matrix.target }}
         override: true
 
-    - name: Install Linux dependencies
+    - name: Install Ubuntu dependencies
       if: startsWith(matrix.os,'ubuntu')
       run: |
         sudo apt-get update && \
@@ -63,41 +63,28 @@ jobs:
         choco upgrade llvm zip psutils -y
 
     - name: set environment variables - Nix
-      continue-on-error: true  # WARNING: only for this example, remove it!
       if: "!startsWith(matrix.os,'Windows')"
       uses: allenevans/set-env@v1.0.0
       with:
         overwrite: true
         CC: gcc
         TBN_FILENAME: 'tari_base_node'
+        SHARUN: 'shasum -a 256'
     - name: set environment variables - Windows
-      continue-on-error: true  # WARNING: only for this example, remove it!
       if: startsWith(matrix.os,'Windows')
       uses: allenevans/set-env@v1.0.0
       with:
         overwrite: true
         SQLITE3_LIB_DIR: 'C:\vcpkg\installed\x64-windows\lib'
         TBN_FILENAME: 'tari_base_node.exe'
+        SHARUN: 'pwsh C:\ProgramData\chocolatey\lib\psutils\tools\psutils-master\shasum.ps1 -a 256'
 #        RUSTFLAGS: '-Ctarget-feature=+crt-static'
 #        CC: gcc
-
-    - name: Pre - Prep
-      continue-on-error: true  # WARNING: only for this example, remove it!
-      shell: bash
-      run: |
-        printenv
-        mkdir -p "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
-        cd "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
-        VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' "$GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml")
-        BINFILE="${TBN_FILENAME}-${{ matrix.os }}-${target_cpu}-${features}-${VERSION}"
-        echo "Filename is $BINFILE"
-        printenv
 
     - name: Build binaries
       continue-on-error: true  # WARNING: only for this example, remove it!
       shell: bash
       run: |
-        printenv
         cd applications/tari_base_node
         cargo build --release --bin tari_base_node --features $features
 
@@ -105,17 +92,21 @@ jobs:
       continue-on-error: true  # WARNING: only for this example, remove it!
       shell: bash
       run: |
-        printenv
         mkdir -p "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
         cd "$GITHUB_WORKSPACE/binaries/${{ matrix.os }}"
         VERSION=$(awk -F ' = ' '$1 ~ /version/ { gsub(/[\"]/, "", $2); printf("%s",$2) }' "$GITHUB_WORKSPACE/applications/tari_base_node/Cargo.toml")
         BINFILE="${TBN_FILENAME}-${{ matrix.os }}-${target_cpu}-${features}-${VERSION}"
-        echo "Filename is $BINFILE"
-        cp -v "$GITHUB_WORKSPACE/target/release/${TBN_FILENAME}" "./$BINFILE"
+        echo "Copying file ${BINFILE} too $(pwd)"
+        cp -v "$GITHUB_WORKSPACE/target/release/${TBN_FILENAME}" "./${BINFILE}"
+        echo "Archive ${BINFILE} too ${BINFILE}.zip"
         zip -j "${BINFILE}.zip" "${BINFILE}"
-        shasum -a 256 "${BINFILE}.zip" ${BINFILE} >> "${BINFILE}.zip.sha256"
-        shasum -a 256 --check "${BINFILE}.zip.sha256"
-        printenv
+        echo "Compute shasum"
+        ${SHARUN} "${BINFILE}.zip" >> "${BINFILE}.zip.sha256"
+        cat "${BINFILE}.zip.sha256"
+        echo "Verifications is "
+        ${SHARUN} --check "${BINFILE}.zip.sha256"
+#        printenv
+
     - name: Upload binary
       uses: actions/upload-artifact@v2
       with:
