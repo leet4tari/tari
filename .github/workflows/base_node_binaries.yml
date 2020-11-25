@@ -86,6 +86,7 @@ jobs:
           libc++abi-dev \
           libprotobuf-dev \
           protobuf-compiler
+        sudo apt-get -y upgrade
 
     - name: Install macOS dependencies
       if: startsWith(matrix.os,'macos')
