@@ -20,49 +20,36 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use crate::validation::{Validation, ValidationError};
+mod service;
+pub use service::BaseNodeWalletRpcService;
 
-pub struct AndThenValidator<T, U> {
-    first: T,
-    second: U,
+use crate::{
+    chain_storage::{async_db::AsyncBlockchainDb, BlockchainBackend},
+    mempool::service::MempoolHandle,
+    proto::generated::{
+        base_node::{TxQueryResponse, TxSubmissionResponse},
+        types::{Signature, Transaction},
+    },
+};
+use tari_comms::protocol::rpc::{Request, Response, RpcStatus};
+use tari_comms_rpc_macros::tari_rpc;
+
+#[tari_rpc(protocol_name = b"t/bnwallet/1", server_struct = BaseNodeWalletRpcServer, client_struct = BaseNodeWalletRpcClient)]
+pub trait BaseNodeWalletService: Send + Sync + 'static {
+    #[rpc(method = 1)]
+    async fn submit_transaction(
+        &self,
+        request: Request<Transaction>,
+    ) -> Result<Response<TxSubmissionResponse>, RpcStatus>;
+
+    #[rpc(method = 2)]
+    async fn transaction_query(&self, request: Request<Signature>) -> Result<Response<TxQueryResponse>, RpcStatus>;
 }
 
-impl<T, U> AndThenValidator<T, U> {
-    pub fn new(first: T, second: U) -> Self {
-        Self { first, second }
-    }
-}
-
-impl<T, U, I> Validation<I> for AndThenValidator<T, U>
-where
-    T: Validation<I>,
-    U: Validation<I>,
+pub fn create_base_node_wallet_rpc_service<B: BlockchainBackend + 'static>(
+    db: AsyncBlockchainDb<B>,
+    mempool: MempoolHandle,
+) -> BaseNodeWalletRpcServer<BaseNodeWalletRpcService<B>>
 {
-    fn validate(&self, item: &I) -> Result<(), ValidationError> {
-        self.first.validate(item)?;
-        self.second.validate(item)?;
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::validation::mocks::MockValidator;
-
-    #[test]
-    fn validation_succeeds() {
-        let validator = AndThenValidator::new(MockValidator::new(true), MockValidator::new(true));
-        validator.validate(&1).unwrap();
-    }
-
-    #[test]
-    fn validation_fails() {
-        let validator = AndThenValidator::new(MockValidator::new(false), MockValidator::new(true));
-        validator.validate(&1).unwrap_err();
-        let validator = AndThenValidator::new(MockValidator::new(true), MockValidator::new(false));
-        validator.validate(&1).unwrap_err();
-        let validator = AndThenValidator::new(MockValidator::new(false), MockValidator::new(false));
-        validator.validate(&1).unwrap_err();
-    }
+    BaseNodeWalletRpcServer::new(BaseNodeWalletRpcService::new(db, mempool))
 }

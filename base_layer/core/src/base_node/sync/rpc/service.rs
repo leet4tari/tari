@@ -21,13 +21,16 @@
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 use crate::{
-    base_node::{
-        proto::{FindChainSplitRequest, FindChainSplitResponse, SyncBlocksRequest, SyncHeadersRequest},
-        sync::rpc::BaseNodeSyncService,
-    },
+    base_node::sync::rpc::BaseNodeSyncService,
     chain_storage::{async_db::AsyncBlockchainDb, BlockchainBackend},
     iterators::NonOverlappingIntegerPairIter,
     proto,
+    proto::generated::base_node::{
+        FindChainSplitRequest,
+        FindChainSplitResponse,
+        SyncBlocksRequest,
+        SyncHeadersRequest,
+    },
 };
 use futures::{channel::mpsc, stream, SinkExt};
 use log::*;
@@ -179,7 +182,7 @@ impl<B: BlockchainBackend + 'static> BaseNodeSyncService for BaseNodeSyncRpcServ
                 .fetch_tip_header()
                 .await
                 .map_err(RpcStatus::log_internal_error(LOG_TARGET))?;
-            count = tip_header.height.saturating_sub(start_header.height);
+            count = tip_header.height().saturating_sub(start_header.height);
         }
         if count == 0 {
             return Ok(Streaming::empty());

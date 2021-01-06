@@ -25,9 +25,9 @@ use crate::{
     base_node::{
         chain_metadata_service::handle::{ChainMetadataEvent, PeerChainMetadata},
         comms_interface::{BlockEvent, LocalNodeCommsInterface},
-        proto,
     },
     chain_storage::BlockAddResult,
+    proto::generated::base_node as proto,
 };
 use futures::stream::StreamExt;
 use log::*;
@@ -143,7 +143,7 @@ impl ChainMetadataService {
     /// Handle BlockEvents
     async fn handle_block_event(&mut self, event: &BlockEvent) -> Result<(), ChainMetadataSyncError> {
         match event {
-            BlockEvent::ValidBlockAdded(_, BlockAddResult::Ok, _) |
+            BlockEvent::ValidBlockAdded(_, BlockAddResult::Ok(_), _) |
             BlockEvent::ValidBlockAdded(_, BlockAddResult::ChainReorg(_, _), _) |
             BlockEvent::BlockSyncComplete(_) => {
                 self.update_liveness_chain_metadata().await?;
