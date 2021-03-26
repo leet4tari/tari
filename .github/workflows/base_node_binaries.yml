@@ -152,6 +152,8 @@ jobs:
       run: |
         #cd applications/tari_base_node
         #cargo build --release --bin tari_base_node --features ${{ matrix.features}}
+        rustc --print target-cpus
+        rustc --print cfg
         cargo build --release
 
     - name: Prepare binaries
