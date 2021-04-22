@@ -8,12 +8,13 @@ echo "Starting Base Node"
 echo
 
 # Initialize
-if [ -z "${use_parent_paths}" ]
-then
+if [ -z "${use_parent_paths}" ]; then
+  # POSIX full path
   base_path="$( cd "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+  # POSIX relative path
   #base_path=${base_path:-$(dirname $0)}
-  config_path="${base_path}/config"
-  exe_path="${base_path}/runtime"
+  config_path=${config_path:-"${base_path}/config"}
+  exe_path=${exe_path:-"${base_path}/runtime"}
 fi
 
 envFile=${envFile:-"$config_path/tari-env"}
