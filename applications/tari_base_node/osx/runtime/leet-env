@@ -1,0 +1,7 @@
+
+#torConnection=service
+torConnection=subprocess
+
+torSocksPort=${torSocksPort:-9055}
+torControlPort=${torControlPort:-'127.0.0.1:9056'}
+#torTest=$(curl --socks5 localhost:$torSocksPort --socks5-hostname localhost:$torSocksPort -s https://check.torproject.org/ | cat | grep -m 1 Congratulations | xargs)
