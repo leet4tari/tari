@@ -17,6 +17,7 @@ name: Build docker images - workflow_call/on-demand
         default: nightly-2024-07-07
       arch:
         type: string
+        # Should be detected
         default: x86-64
       features:
         type: string
@@ -34,7 +35,8 @@ name: Build docker images - workflow_call/on-demand
       platforms:
         type: string
         # linux/arm64, linux/amd64
-        default: linux/amd64
+        #default: linux/amd64
+        default: linux/arm64, linux/amd64
 
 env:
 #  LAUNCHPAD_REPO: tari-project/tari-launchpad
@@ -62,7 +64,8 @@ jobs:
         id: set_matrix
         shell: bash
         run: |
-          build_items=${{ inputs.build_items }}
+          #build_items=${{ inputs.build_items }}
+          build_items=all
           echo "Building with ${build_items}."
           if [ -z "${build_items}" ] || [ "${build_items}" = "minotari_all" ] ; then
             echo "Build all Minotari images"
