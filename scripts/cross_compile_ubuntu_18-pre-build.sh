@@ -6,7 +6,16 @@
 set -e
 
 # APT Proxy for quicker testing
-#export http_proxy=http://apt-proxy.local:3142
+#export HTTP_PROXY_APT=http://apt-proxy.local:3142
+if [ ! -z "${HTTP_PROXY_APT}" ] && [ -d "/etc/apt/apt.conf.d/" ]; then
+  echo "Setup apt proxy - ${HTTP_PROXY_APT}"
+  cat << APT-EoF > /etc/apt/apt.conf.d/proxy.conf
+Acquire {
+  HTTP::proxy "${HTTP_PROXY_APT}";
+  #HTTPS::proxy "http://127.0.0.1:8080";
+}
+APT-EoF
+fi
 
 USAGE="Usage: $0 {target build}
  where target build is one of the following:

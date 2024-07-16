@@ -9,7 +9,6 @@ printenv
 rustup show
 rustup --verbose update
 
-
 if [ "${TARGETARCH}" = "arm64" ] ; then
   platform_env=aarch64
   export BUILD_TARGET="${platform_env}-unknown-linux-gnu/"
@@ -23,7 +22,7 @@ if [ "${TARGETARCH}" = "arm64" ] ; then
   #export ROARING_ARCH=$ARCH
   export PKG_CONFIG_ALLOW_CROSS="true"
   export PKG_CONFIG_PATH="/usr/lib/${platform_env}-linux-gnu/pkgconfig"
-  export RUSTFLAGS="-L /usr/${platform_env}-linux-gnu/lib/ -L /usr/lib/${platform_env}-linux-gnu/"
+  #export RUSTFLAGS="-L /usr/${platform_env}-linux-gnu/lib/ -L /usr/lib/${platform_env}-linux-gnu/"
   rustup target add ${platform_env}-unknown-linux-gnu
   rustup toolchain install stable-${platform_env}-unknown-linux-gnu --force-non-host
 
