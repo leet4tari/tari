@@ -238,7 +238,7 @@ async fn it_allows_multiple_coinbases() {
     let (blockchain, validator) = setup(true).await;
 
     let (mut block, coinbase) = blockchain.create_unmined_block(block_spec!("A1", parent: "GB")).await;
-    let spend_key_id = KeyId::Managed {
+    let commitment_mask_key = KeyId::Managed {
         branch: TransactionKeyManagerBranch::CommitmentMask.get_branch_key(),
         index: 42,
     };
@@ -246,7 +246,7 @@ async fn it_allows_multiple_coinbases() {
     let (_, coinbase_output) = CoinbaseBuilder::new(blockchain.km.clone())
         .with_block_height(1)
         .with_fees(0.into())
-        .with_spend_key_id(spend_key_id.clone())
+        .with_commitment_mask_id(commitment_mask_key.clone())
         .with_encryption_key_id(TariKeyId::default())
         .with_sender_offset_key_id(TariKeyId::default())
         .with_script_key_id(TariKeyId::default())
@@ -437,7 +437,7 @@ async fn it_limits_the_encrypted_data_byte_size() {
     let (txs, _) = schema_to_transaction(&[schema1], &blockchain.km).await;
     let mut txs = txs.into_iter().map(|t| Arc::try_unwrap(t).unwrap()).collect::<Vec<_>>();
     let mut outputs = txs[0].body.outputs().clone();
-    outputs[0].encrypted_data = EncryptedData::from_vec_unsafe(vec![0; STATIC_ENCRYPTED_DATA_SIZE_TOTAL + 257]);
+    outputs[0].encrypted_data = EncryptedData::from_vec_unsafe(vec![0; STATIC_ENCRYPTED_DATA_SIZE_TOTAL + 250]);
     txs[0].body = AggregateBody::new(txs[0].body.inputs().clone(), outputs, txs[0].body.kernels().clone());
     let (block, _) = blockchain.create_next_tip(block_spec!("B", transactions: txs)).await;
 

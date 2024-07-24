@@ -22,29 +22,25 @@
 
 use std::{collections::HashMap, convert::TryInto, fmt, sync::Arc};
 
-use blake2::Blake2b;
 use diesel::result::{DatabaseErrorKind, Error as DieselError};
-use digest::consts::U32;
 use futures::{pin_mut, StreamExt};
 use log::*;
 use rand::{rngs::OsRng, RngCore};
-use tari_common::configuration::Network;
 use tari_common_types::{
     tari_address::TariAddress,
     transaction::TxId,
     types::{BlockHash, Commitment, HashOutput, PrivateKey, PublicKey},
 };
-use tari_comms::{types::CommsDHKE, NodeIdentity};
+use tari_comms::types::CommsDHKE;
 use tari_core::{
     borsh::SerializedSize,
-    consensus::{ConsensusConstants, DomainSeparatedConsensusHasher},
+    consensus::ConsensusConstants,
     covenants::Covenant,
     one_sided::{
         public_key_to_output_encryption_key,
         shared_secret_to_output_encryption_key,
         shared_secret_to_output_spending_key,
         stealth_address_script_spending_key,
-        FaucetHashDomain,
     },
     proto::base_node::FetchMatchingUtxos,
     transactions::{
@@ -111,7 +107,6 @@ use crate::{
         tasks::TxoValidationTask,
         TRANSACTION_INPUTS_LIMIT,
     },
-    util::wallet_identity::WalletIdentity,
 };
 
 const LOG_TARGET: &str = "wallet::output_manager_service";
@@ -149,15 +144,8 @@ where
         shutdown_signal: ShutdownSignal,
         base_node_service: BaseNodeServiceHandle,
         connectivity: TWalletConnectivity,
-        node_identity: Arc<NodeIdentity>,
-        network: Network,
         key_manager: TKeyManagerInterface,
     ) -> Result<Self, OutputManagerError> {
-        let view_key = key_manager.get_view_key_id().await?;
-        let view_key = key_manager.get_public_key_at_key_id(&view_key).await?;
-        let tari_address =
-            TariAddress::new_dual_address_with_default_features(view_key, node_identity.public_key().clone(), network);
-        let wallet_identity = WalletIdentity::new(node_identity.clone(), tari_address);
         let resources = OutputManagerResources {
             config,
             db,
@@ -167,7 +155,6 @@ where
             key_manager,
             consensus_constants,
             shutdown_signal,
-            wallet_identity,
         };
 
         Ok(Self {
@@ -180,13 +167,6 @@ where
     }
 
     pub async fn start(mut self) -> Result<(), OutputManagerError> {
-        // we need to ensure the wallet identity secret key is stored in the key manager
-        let _key_id = self
-            .resources
-            .key_manager
-            .import_key(self.resources.wallet_identity.node_identity.secret_key().clone())
-            .await?;
-
         let request_stream = self
             .request_stream
             .take()
@@ -704,16 +684,19 @@ where
         value: MicroMinotari,
         features: OutputFeatures,
     ) -> Result<WalletOutputBuilder, OutputManagerError> {
-        let (spending_key_id, _spending_key_id, script_key_id, _script_public_key) =
-            self.resources.key_manager.get_next_spend_and_script_key_ids().await?;
+        let (commitment_mask_key, script_key) = self
+            .resources
+            .key_manager
+            .get_next_commitment_mask_and_script_key()
+            .await?;
         let input_data = ExecutionStack::default();
         let script = TariScript::default();
 
-        Ok(WalletOutputBuilder::new(value, spending_key_id)
+        Ok(WalletOutputBuilder::new(value, commitment_mask_key.key_id)
             .with_features(features)
             .with_script(script)
             .with_input_data(input_data)
-            .with_script_key(script_key_id))
+            .with_script_key(script_key.key_id))
     }
 
     fn get_balance(&self, current_tip_for_time_lock_calculation: Option<u64>) -> Result<Balance, OutputManagerError> {
@@ -752,15 +735,18 @@ where
             return Err(OutputManagerError::InvalidKernelFeatures);
         }
 
-        let (spending_key_id, _, script_key_id, script_public_key) =
-            self.resources.key_manager.get_next_spend_and_script_key_ids().await?;
+        let (spending_key, script_public_key) = self
+            .resources
+            .key_manager
+            .get_next_commitment_mask_and_script_key()
+            .await?;
 
         // Confirm script hash is for the expected script, at the moment assuming Nop or Push_pubkey
         // if the script is Push_pubkey(default_key) we know we have to fill it in.
         let script = if single_round_sender_data.script == script!(Nop) {
             single_round_sender_data.script.clone()
         } else if single_round_sender_data.script == script!(PushPubKey(Box::default())) {
-            script!(PushPubKey(Box::new(script_public_key.clone())))
+            script!(PushPubKey(Box::new(script_public_key.pub_key.clone())))
         } else {
             return Err(OutputManagerError::InvalidScriptHash);
         };
@@ -769,7 +755,7 @@ where
             .resources
             .key_manager
             .encrypt_data_for_recovery(
-                &spending_key_id,
+                &spending_key.key_id,
                 None,
                 single_round_sender_data.amount.as_u64(),
                 PaymentId::Empty,
@@ -790,7 +776,7 @@ where
             .resources
             .key_manager
             .get_receiver_partial_metadata_signature(
-                &spending_key_id,
+                &spending_key.key_id,
                 &single_round_sender_data.amount.into(),
                 &single_round_sender_data.sender_offset_public_key,
                 &single_round_sender_data.ephemeral_public_nonce,
@@ -802,11 +788,11 @@ where
 
         let key_kanager_output = WalletOutput::new_current_version(
             single_round_sender_data.amount,
-            spending_key_id.clone(),
+            spending_key.key_id.clone(),
             single_round_sender_data.features.clone(),
             script,
             ExecutionStack::default(),
-            script_key_id,
+            script_public_key.key_id,
             single_round_sender_data.sender_offset_public_key.clone(),
             // Note: The signature at this time is only partially built
             metadata_signature,
@@ -1001,13 +987,16 @@ where
             input_selection.num_selected()
         );
 
-        let (change_spending_key_id, _, change_script_key_id, change_script_public_key) =
-            self.resources.key_manager.get_next_spend_and_script_key_ids().await?;
+        let (change_commitment_mask_key, change_script_key) = self
+            .resources
+            .key_manager
+            .get_next_commitment_mask_and_script_key()
+            .await?;
         builder.with_change_data(
-            script!(PushPubKey(Box::new(change_script_public_key.clone()))),
+            script!(PushPubKey(Box::new(change_script_key.pub_key.clone()))),
             ExecutionStack::default(),
-            change_script_key_id,
-            change_spending_key_id,
+            change_script_key.key_id,
+            change_commitment_mask_key.key_id,
             Covenant::default(),
         );
 
@@ -1105,31 +1094,34 @@ where
         }
 
         if input_selection.requires_change_output() {
-            let (change_spending_key_id, _, change_script_key_id, change_script_public_key) =
-                self.resources.key_manager.get_next_spend_and_script_key_ids().await?;
+            let (change_commitment_mask_key, change_script_key) = self
+                .resources
+                .key_manager
+                .get_next_commitment_mask_and_script_key()
+                .await?;
             builder.with_change_data(
-                script!(PushPubKey(Box::new(change_script_public_key))),
+                script!(PushPubKey(Box::new(change_script_key.pub_key))),
                 ExecutionStack::default(),
-                change_script_key_id,
-                change_spending_key_id,
+                change_script_key.key_id,
+                change_commitment_mask_key.key_id,
                 Covenant::default(),
             );
         }
 
         let mut db_outputs = vec![];
         for mut wallet_output in outputs {
-            let (sender_offset_key_id, _) = self
+            let sender_offset_key = self
                 .resources
                 .key_manager
                 .get_next_key(TransactionKeyManagerBranch::SenderOffset.get_branch_key())
                 .await?;
             wallet_output = wallet_output
-                .sign_as_sender_and_receiver(&self.resources.key_manager, &sender_offset_key_id)
+                .sign_as_sender_and_receiver(&self.resources.key_manager, &sender_offset_key.key_id)
                 .await?;
 
             let ub = wallet_output.try_build(&self.resources.key_manager).await?;
             builder
-                .with_output(ub.clone(), sender_offset_key_id.clone())
+                .with_output(ub.clone(), sender_offset_key.key_id.clone())
                 .await
                 .map_err(|e| OutputManagerError::BuildError(e.to_string()))?;
             db_outputs.push(
@@ -1242,18 +1234,16 @@ where
             if output.verify_mask(&self.resources.factories.range_proof, &spending_key, amount.as_u64())? {
                 let mut script_signatures = Vec::new();
                 // lets add our own signature to the list
-                let script_challange: [u8; 32] =
-                    DomainSeparatedConsensusHasher::<FaucetHashDomain, Blake2b<U32>>::new("com_hash")
-                        .chain(output.commitment())
-                        .finalize()
-                        .into();
                 let self_signature = self
                     .resources
                     .key_manager
-                    .sign_script_message(&self.resources.wallet_identity.wallet_node_key_id, &script_challange)
+                    .sign_script_message(
+                        &self.resources.key_manager.get_spend_key().await?.key_id,
+                        output.commitment.as_bytes(),
+                    )
                     .await?;
                 script_input_shares.insert(
-                    self.resources.wallet_identity.address.public_spend_key().clone(),
+                    self.resources.key_manager.get_spend_key().await?.pub_key,
                     self_signature,
                 );
 
@@ -1263,7 +1253,7 @@ where
                     if let Some(signature) = script_input_shares.get(&key) {
                         script_signatures.push(StackItem::Signature(signature.clone()));
                         // our own key should not be added yet, it will be added with the script signing
-                        if &key != self.resources.wallet_identity.address.public_spend_key() {
+                        if key != self.resources.key_manager.get_spend_key().await?.pub_key {
                             aggregated_script_public_key_shares = aggregated_script_public_key_shares + key;
                         }
                     }
@@ -1276,7 +1266,7 @@ where
                     output.features,
                     output.script,
                     ExecutionStack::new(script_signatures),
-                    self.resources.wallet_identity.wallet_node_key_id.clone(), // Only of the master wallet
+                    self.resources.key_manager.get_spend_key().await?.key_id, // Only of the master wallet
                     output.sender_offset_public_key,
                     output.metadata_signature,
                     0,
@@ -1435,7 +1425,7 @@ where
             .await?
             .with_input_data(ExecutionStack::default()) // Just a placeholder in the wallet
             .with_sender_offset_public_key(sender_offset_public_key)
-            .with_script_key(self.resources.wallet_identity.wallet_node_key_id.clone())
+            .with_script_key(self.resources.key_manager.get_spend_key().await?.key_id)
             .with_minimum_value_promise(minimum_value_promise)
             .sign_partial_as_sender_and_receiver(
                 &self.resources.key_manager,
@@ -1561,13 +1551,16 @@ where
 
         let mut outputs = vec![output];
 
-        let (change_spending_key_id, _spend_public_key, change_script_key_id, change_script_public_key) =
-            self.resources.key_manager.get_next_spend_and_script_key_ids().await?;
+        let (change_commitment_mask_key_id, change_script_public_key) = self
+            .resources
+            .key_manager
+            .get_next_commitment_mask_and_script_key()
+            .await?;
         builder.with_change_data(
-            script!(PushPubKey(Box::new(change_script_public_key.clone()))),
+            script!(PushPubKey(Box::new(change_script_public_key.pub_key.clone()))),
             ExecutionStack::default(),
-            change_script_key_id.clone(),
-            change_spending_key_id,
+            change_script_public_key.key_id.clone(),
+            change_commitment_mask_key_id.key_id,
             Covenant::default(),
         );
 
@@ -2192,13 +2185,16 @@ where
 
         // extending transaction if there is some `change` left over
         if has_leftover_change {
-            let (change_spending_key_id, _, change_script_key_id, change_script_public_key) =
-                self.resources.key_manager.get_next_spend_and_script_key_ids().await?;
+            let (change_mask, change_script) = self
+                .resources
+                .key_manager
+                .get_next_commitment_mask_and_script_key()
+                .await?;
             tx_builder.with_change_data(
-                script!(PushPubKey(Box::new(change_script_public_key))),
+                script!(PushPubKey(Box::new(change_script.pub_key))),
                 ExecutionStack::default(),
-                change_script_key_id,
-                change_spending_key_id,
+                change_script.key_id,
+                change_mask.key_id,
                 Covenant::default(),
             );
         }
@@ -2271,14 +2267,17 @@ where
         amount: MicroMinotari,
         covenant: Covenant,
     ) -> Result<(DbWalletOutput, TariKeyId), OutputManagerError> {
-        let (spending_key_id, _, script_key_id, script_public_key) =
-            self.resources.key_manager.get_next_spend_and_script_key_ids().await?;
-        let script = script!(PushPubKey(Box::new(script_public_key.clone())));
+        let (commitment_mask_key, script_key) = self
+            .resources
+            .key_manager
+            .get_next_commitment_mask_and_script_key()
+            .await?;
+        let script = script!(PushPubKey(Box::new(script_key.pub_key.clone())));
 
         let encrypted_data = self
             .resources
             .key_manager
-            .encrypt_data_for_recovery(&spending_key_id, None, amount.as_u64(), PaymentId::Empty)
+            .encrypt_data_for_recovery(&commitment_mask_key.key_id, None, amount.as_u64(), PaymentId::Empty)
             .await?;
         let minimum_value_promise = MicroMinotari::zero();
         let metadata_message = TransactionOutput::metadata_signature_message_from_parts(
@@ -2289,7 +2288,7 @@ where
             &encrypted_data,
             &minimum_value_promise,
         );
-        let (sender_offset_key_id, sender_offset_public_key) = self
+        let sender_offset = self
             .resources
             .key_manager
             .get_next_key(TransactionKeyManagerBranch::SenderOffset.get_branch_key())
@@ -2298,9 +2297,9 @@ where
             .resources
             .key_manager
             .get_metadata_signature(
-                &spending_key_id,
+                &commitment_mask_key.key_id,
                 &PrivateKey::from(amount),
-                &sender_offset_key_id,
+                &sender_offset.key_id,
                 &TransactionOutputVersion::get_current_version(),
                 &metadata_message,
                 output_features.range_proof_type,
@@ -2310,12 +2309,12 @@ where
         let output = DbWalletOutput::from_wallet_output(
             WalletOutput::new_current_version(
                 amount,
-                spending_key_id,
+                commitment_mask_key.key_id,
                 output_features,
                 script,
                 ExecutionStack::default(),
-                script_key_id,
-                sender_offset_public_key,
+                script_key.key_id,
+                sender_offset.pub_key,
                 metadata_signature,
                 0,
                 covenant,
@@ -2333,7 +2332,7 @@ where
         )
         .await?;
 
-        Ok((output, sender_offset_key_id))
+        Ok((output, sender_offset.key_id))
     }
 
     #[allow(clippy::too_many_lines)]
@@ -2477,7 +2476,7 @@ where
             .resources
             .key_manager
             .get_diffie_hellman_shared_secret(
-                &self.resources.key_manager.get_view_key_id().await?,
+                &self.resources.key_manager.get_view_key().await?.key_id,
                 &output.sender_offset_public_key,
             )
             .await?;
@@ -2494,7 +2493,7 @@ where
                     output.features,
                     output.script,
                     inputs!(pre_image),
-                    self.resources.wallet_identity.wallet_node_key_id.clone(),
+                    self.resources.key_manager.get_spend_key().await?.key_id,
                     output.sender_offset_public_key,
                     output.metadata_signature,
                     // Although the technically the script does have a script lock higher than 0, this does not apply
@@ -2525,13 +2524,16 @@ where
 
                 let mut outputs = Vec::new();
 
-                let (change_spending_key_id, _, change_script_key_id, change_script_public_key) =
-                    self.resources.key_manager.get_next_spend_and_script_key_ids().await?;
+                let (change_commitment_mask_key, change_script_key) = self
+                    .resources
+                    .key_manager
+                    .get_next_commitment_mask_and_script_key()
+                    .await?;
                 builder.with_change_data(
-                    script!(PushPubKey(Box::new(change_script_public_key.clone()))),
+                    script!(PushPubKey(Box::new(change_script_key.pub_key.clone()))),
                     ExecutionStack::default(),
-                    change_script_key_id,
-                    change_spending_key_id,
+                    change_script_key.key_id,
+                    change_commitment_mask_key.key_id,
                     Covenant::default(),
                 );
 
@@ -2606,13 +2608,16 @@ where
 
         let mut outputs = Vec::new();
 
-        let (change_spending_key_id, _, change_script_key_id, change_script_public_key) =
-            self.resources.key_manager.get_next_spend_and_script_key_ids().await?;
+        let (change_commitment_mask_key, change_script_key) = self
+            .resources
+            .key_manager
+            .get_next_commitment_mask_and_script_key()
+            .await?;
         builder.with_change_data(
-            script!(PushPubKey(Box::new(change_script_public_key.clone()))),
+            script!(PushPubKey(Box::new(change_script_key.pub_key.clone()))),
             ExecutionStack::default(),
-            change_script_key_id,
-            change_spending_key_id,
+            change_script_key.key_id,
+            change_commitment_mask_key.key_id,
             Covenant::default(),
         );
 
@@ -2689,9 +2694,8 @@ where
             ));
         }
 
-        let wallet_sk = self.resources.wallet_identity.wallet_node_key_id.clone();
-        let wallet_pk = self.resources.key_manager.get_public_key_at_key_id(&wallet_sk).await?;
-        let wallet_view_key = self.resources.key_manager.get_view_key_id().await?;
+        let spend_key = self.resources.key_manager.get_spend_key().await?;
+        let view_key = self.resources.key_manager.get_view_key().await?;
 
         let mut scanned_outputs = vec![];
 
@@ -2701,7 +2705,7 @@ where
                     let shared_secret = self
                         .resources
                         .key_manager
-                        .get_diffie_hellman_shared_secret(&wallet_view_key, &output.sender_offset_public_key)
+                        .get_diffie_hellman_shared_secret(&view_key.key_id, &output.sender_offset_public_key)
                         .await?;
                     scanned_outputs.push((
                         output.clone(),
@@ -2715,9 +2719,10 @@ where
                     let stealth_address_hasher = self
                         .resources
                         .key_manager
-                        .get_diffie_hellman_stealth_domain_hasher(&wallet_view_key, &output.sender_offset_public_key)
+                        .get_diffie_hellman_stealth_domain_hasher(&view_key.key_id, &output.sender_offset_public_key)
                         .await?;
-                    let script_spending_key = stealth_address_script_spending_key(&stealth_address_hasher, &wallet_pk);
+                    let script_spending_key =
+                        stealth_address_script_spending_key(&stealth_address_hasher, &spend_key.pub_key);
                     if &script_spending_key != scanned_pk.as_ref() {
                         continue;
                     }
@@ -2728,13 +2733,13 @@ where
                     let stealth_key = self
                         .resources
                         .key_manager
-                        .import_add_offset_to_private_key(&wallet_sk, stealth_address_offset)
+                        .import_add_offset_to_private_key(&spend_key.key_id, stealth_address_offset)
                         .await?;
 
                     let shared_secret = self
                         .resources
                         .key_manager
-                        .get_diffie_hellman_shared_secret(&wallet_view_key, &output.sender_offset_public_key)
+                        .get_diffie_hellman_shared_secret(&view_key.key_id, &output.sender_offset_public_key)
                         .await?;
                     scanned_outputs.push((
                         output.clone(),

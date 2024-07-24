@@ -31,13 +31,14 @@ use tari_crypto::{
     hashing::DomainSeparatedHasher,
     keys::{PublicKey, SecretKey},
 };
-use tari_utilities::{hex::Hex, ByteArray};
+use tari_utilities::ByteArray;
 
 use crate::{
     cipher_seed::CipherSeed,
     key_manager::KeyManager,
     key_manager_service::{
         error::KeyManagerServiceError,
+        interface::KeyAndId,
         storage::database::{KeyManagerBackend, KeyManagerDatabase, KeyManagerState},
         AddResult,
         KeyDigest,
@@ -97,7 +98,7 @@ where
         Ok(result)
     }
 
-    pub async fn get_next_key(&self, branch: &str) -> Result<(KeyId<PK>, PK), KeyManagerServiceError> {
+    pub async fn get_next_key(&self, branch: &str) -> Result<KeyAndId<PK>, KeyManagerServiceError> {
         let mut km = self
             .key_managers
             .get(branch)
@@ -107,20 +108,24 @@ where
         self.db.increment_key_index(branch)?;
         let index = km.increment_key_index(1);
         let key = km.derive_public_key(index)?.key;
-        Ok((
-            KeyId::Managed {
+
+        Ok(KeyAndId {
+            key_id: KeyId::Managed {
                 branch: branch.to_string(),
                 index,
             },
-            key,
-        ))
+            pub_key: key,
+        })
     }
 
-    pub async fn get_random_key(&self) -> Result<(KeyId<PK>, PK), KeyManagerServiceError> {
+    pub async fn get_random_key(&self) -> Result<KeyAndId<PK>, KeyManagerServiceError> {
         let random_private_key = PK::K::random(&mut OsRng);
         let key_id = self.import_key(random_private_key).await?;
         let public_key = self.get_public_key_at_key_id(&key_id).await?;
-        Ok((key_id, public_key))
+        Ok(KeyAndId {
+            key_id,
+            pub_key: public_key,
+        })
     }
 
     pub async fn get_static_key(&self, branch: &str) -> Result<KeyId<PK>, KeyManagerServiceError> {
@@ -217,9 +222,7 @@ where
 
     pub async fn import_key(&self, private_key: PK::K) -> Result<KeyId<PK>, KeyManagerServiceError> {
         let public_key = PK::from_secret_key(&private_key);
-        let hex_key = public_key.to_hex();
         self.db.insert_imported_key(public_key.clone(), private_key)?;
-        trace!(target: LOG_TARGET, "Imported key {}", hex_key);
         let key_id = KeyId::Imported { key: public_key };
         Ok(key_id)
     }

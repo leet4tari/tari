@@ -15,9 +15,8 @@ mod app_ui {
 }
 mod handlers {
     pub mod get_dh_shared_secret;
-    pub mod get_metadata_signature;
-    pub mod get_public_alpha;
     pub mod get_public_key;
+    pub mod get_public_spend_key;
     pub mod get_script_offset;
     pub mod get_script_signature;
     pub mod get_version;
@@ -30,12 +29,10 @@ use app_ui::menu::ui_menu_main;
 use critical_section::RawRestoreState;
 use handlers::{
     get_dh_shared_secret::handler_get_dh_shared_secret,
-    get_metadata_signature::handler_get_metadata_signature,
-    get_public_alpha::handler_get_public_alpha,
     get_public_key::handler_get_public_key,
+    get_public_spend_key::handler_get_public_spend_key,
     get_script_offset::{handler_get_script_offset, ScriptOffsetCtx},
     get_script_signature::handler_get_script_signature,
-    get_script_signature_from_challenge::handler_get_script_signature_from_challenge,
     get_version::handler_get_version,
     get_view_key::handler_get_view_key,
 };
@@ -96,12 +93,15 @@ pub enum AppSW {
     ClaNotSupported = 0x6E00,
     ScriptSignatureFail = 0xB001,
     MetadataSignatureFail = 0xB002,
+    ScriptOffsetNotUnique = 0xB004,
+    BadBranchKey = 0xB005,
     KeyDeriveFail = 0xB009,
     KeyDeriveFromCanonical = 0xB010,
     KeyDeriveFromUniform = 0xB011,
     VersionParsingFail = 0xB00A,
     TooManyPayloads = 0xB003,
     WrongApduLength = StatusWords::BadLen as u16,
+    UserCancelled = StatusWords::UserCancelled as u16,
 }
 
 impl From<AppSW> for Reply {
@@ -115,26 +115,25 @@ pub enum Instruction {
     GetVersion,
     GetAppName,
     GetPublicKey,
-    GetPublicAlpha,
+    GetPublicSpendKey,
     GetScriptSignature,
     GetScriptOffset { chunk: u8, more: bool },
-    GetMetadataSignature,
+    GetScriptSignatureFromChallenge,
     GetViewKey,
     GetDHSharedSecret,
 }
 
 const P2_MORE: u8 = 0x01;
-const STATIC_ALPHA_INDEX: u64 = 42;
+const STATIC_SPEND_INDEX: u64 = 42;
 const STATIC_VIEW_INDEX: u64 = 57311; // No significance, just a random number by large dice roll
 const MAX_PAYLOADS: u8 = 250;
 
 #[repr(u8)]
 pub enum KeyType {
-    Alpha = 0x01,
+    Spend = 0x01,
     Nonce = 0x02,
-    Recovery = 0x03,
-    SenderOffset = 0x04,
-    ViewKey = 0x05,
+    ViewKey = 0x03,
+    OneSidedSenderOffset = 0x04,
 }
 
 impl KeyType {
@@ -142,11 +141,13 @@ impl KeyType {
         self as u8
     }
 
-    fn from_branch_key(n: u64) -> Self {
+    fn from_branch_key(n: u64) -> Result<Self, AppSW> {
+        // These numbers need to match the TransactionKeyManagerBranches in:
+        // base_layer/core/src/transactions/key_manager/interface.rs
         match n {
-            1 => Self::Alpha,
-            6 => Self::SenderOffset,
-            5 | 2 | _ => Self::Nonce,
+            7 => Ok(Self::Spend),
+            6 => Ok(Self::OneSidedSenderOffset),
+            _ => Err(AppSW::BadBranchKey),
         }
     }
 }
@@ -169,14 +170,13 @@ impl TryFrom<ApduHeader> for Instruction {
         match (value.ins, value.p1, value.p2) {
             (0x01, 0, 0) => Ok(Instruction::GetVersion),
             (0x02, 0, 0) => Ok(Instruction::GetAppName),
-            (0x03, 0, 0) => Ok(Instruction::GetPublicAlpha),
+            (0x03, 0, 0) => Ok(Instruction::GetPublicSpendKey),
             (0x04, 0, 0) => Ok(Instruction::GetPublicKey),
             (0x05, 0, 0) => Ok(Instruction::GetScriptSignature),
             (0x06, 0..=MAX_PAYLOADS, 0 | P2_MORE) => Ok(Instruction::GetScriptOffset {
                 chunk: value.p1,
                 more: value.p2 == P2_MORE,
             }),
-            (0x07, 0, 0) => Ok(Instruction::GetMetadataSignature),
             (0x08, 0, 0) => Ok(Instruction::GetScriptSignatureFromChallenge),
             (0x09, 0, 0) => Ok(Instruction::GetViewKey),
             (0x10, 0, 0) => Ok(Instruction::GetDHSharedSecret),
@@ -222,10 +222,9 @@ fn handle_apdu(comm: &mut Comm, ins: Instruction, offset_ctx: &mut ScriptOffsetC
             Ok(())
         },
         Instruction::GetPublicKey => handler_get_public_key(comm),
-        Instruction::GetPublicAlpha => handler_get_public_alpha(comm),
+        Instruction::GetPublicSpendKey => handler_get_public_spend_key(comm),
         Instruction::GetScriptSignature => handler_get_script_signature(comm),
         Instruction::GetScriptOffset { chunk, more } => handler_get_script_offset(comm, chunk, more, offset_ctx),
-        Instruction::GetMetadataSignature => handler_get_metadata_signature(comm),
         Instruction::GetScriptSignatureFromChallenge => handler_get_script_signature_from_challenge(comm),
         Instruction::GetViewKey => handler_get_view_key(comm),
         Instruction::GetDHSharedSecret => handler_get_dh_shared_secret(comm),

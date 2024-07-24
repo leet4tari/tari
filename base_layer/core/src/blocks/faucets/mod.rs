@@ -24,8 +24,6 @@ mod test {
 
     use std::{convert::TryFrom, fs::File, io::Write};
 
-    use blake2::Blake2b;
-    use digest::consts::U32;
     use rand::rngs::OsRng;
     use tari_common_types::{
         tari_address::TariAddress,
@@ -34,10 +32,10 @@ mod test {
     use tari_crypto::keys::{PublicKey as PkTrait, SecretKey as SkTrait};
     use tari_key_manager::key_manager_service::KeyManagerInterface;
     use tari_script::{ExecutionStack, Opcode::CheckMultiSigVerifyAggregatePubKey, TariScript};
+    use tari_utilities::ByteArray;
 
     use crate::{
-        consensus::DomainSeparatedConsensusHasher,
-        one_sided::{public_key_to_output_encryption_key, FaucetHashDomain},
+        one_sided::public_key_to_output_encryption_key,
         transactions::{
             key_manager::{
                 create_memory_db_key_manager,
@@ -84,16 +82,17 @@ mod test {
         let mut total_private_key = PrivateKey::default();
 
         for _ in 0..num_faucets {
-            let (spend_key_id, _spend_key_pk, script_key_id, _script_key_pk) =
-                key_manager.get_next_spend_and_script_key_ids().await.unwrap();
-            total_private_key = total_private_key + &key_manager.get_private_key(&spend_key_id).await.unwrap();
-            let commitment = key_manager.get_commitment(&spend_key_id, &amount.into()).await.unwrap();
-            let com_hash: [u8; 32] = DomainSeparatedConsensusHasher::<FaucetHashDomain, Blake2b<U32>>::new("com_hash")
-                .chain(&commitment)
-                .finalize()
-                .into();
+            let (commitment_mask, script_key) = key_manager.get_next_commitment_mask_and_script_key().await.unwrap();
+            total_private_key =
+                total_private_key + &key_manager.get_private_key(&commitment_mask.key_id).await.unwrap();
+            let commitment = key_manager
+                .get_commitment(&commitment_mask.key_id, &amount.into())
+                .await
+                .unwrap();
+            let mut commitment_bytes = [0u8; 32];
+            commitment_bytes.clone_from_slice(commitment.as_bytes());
 
-            let (sender_offset_key_id, sender_offset_key_pk) = key_manager
+            let sender_offset = key_manager
                 .get_next_key(TransactionKeyManagerBranch::SenderOffset.get_branch_key())
                 .await
                 .unwrap();
@@ -101,9 +100,9 @@ mod test {
                 signature_threshold,
                 address_len,
                 list_of_spend_keys.clone(),
-                Box::new(com_hash),
+                Box::new(commitment_bytes),
             )]);
-            let output = WalletOutputBuilder::new(amount, spend_key_id)
+            let output = WalletOutputBuilder::new(amount, commitment_mask.key_id)
                 .with_features(OutputFeatures::new(
                     OutputFeaturesVersion::get_current_version(),
                     OutputType::Standard,
@@ -118,10 +117,10 @@ mod test {
                 .unwrap()
                 .with_input_data(ExecutionStack::default())
                 .with_version(TransactionOutputVersion::get_current_version())
-                .with_sender_offset_public_key(sender_offset_key_pk)
-                .with_script_key(script_key_id)
+                .with_sender_offset_public_key(sender_offset.pub_key)
+                .with_script_key(script_key.key_id)
                 .with_minimum_value_promise(amount)
-                .sign_as_sender_and_receiver(&key_manager, &sender_offset_key_id)
+                .sign_as_sender_and_receiver(&key_manager, &sender_offset.key_id)
                 .await
                 .unwrap()
                 .try_build(&key_manager)

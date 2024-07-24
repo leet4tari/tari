@@ -54,7 +54,7 @@ use tari_core::{
     },
     proto::{base_node as base_node_proto, base_node::FetchMatchingUtxos},
     transactions::{
-        key_manager::{TariKeyId, TransactionKeyManagerInterface},
+        key_manager::{TariKeyId, TransactionKeyManagerBranch, TransactionKeyManagerInterface},
         tari_amount::MicroMinotari,
         transaction_components::{
             encrypted_data::PaymentId,
@@ -84,7 +84,6 @@ use tari_crypto::{
 use tari_key_manager::key_manager_service::KeyId;
 use tari_p2p::domain_message::DomainMessage;
 use tari_script::{
-    inputs,
     push_pubkey_script,
     script,
     slice_to_boxed_message,
@@ -142,7 +141,7 @@ use crate::{
         },
         utc::utc_duration_since,
     },
-    util::{wallet_identity::WalletIdentity, watch::Watch},
+    util::watch::Watch,
     utxo_scanner_service::RECOVERY_KEY,
     OperationId,
 };
@@ -260,11 +259,22 @@ where
     ) -> Result<Self, TransactionServiceError> {
         // Collect the resources that all protocols will need so that they can be neatly cloned as the protocols are
         // spawned.
-        let view_key = core_key_manager_service.get_view_key_id().await?;
-        let view_key = core_key_manager_service.get_public_key_at_key_id(&view_key).await?;
-        let tari_address =
-            TariAddress::new_dual_address_with_default_features(view_key, node_identity.public_key().clone(), network);
-        let wallet_identity = WalletIdentity::new(node_identity.clone(), tari_address);
+        let view_key = core_key_manager_service.get_view_key().await?;
+        let spend_key = core_key_manager_service.get_spend_key().await?;
+        let comms_key = core_key_manager_service.get_comms_key().await?;
+        let interactive_features = if spend_key == comms_key {
+            TariAddressFeatures::create_interactive_and_one_sided()
+        } else {
+            TariAddressFeatures::create_one_sided_only()
+        };
+        let one_sided_tari_address = TariAddress::new_dual_address(
+            view_key.pub_key.clone(),
+            comms_key.pub_key,
+            network,
+            TariAddressFeatures::create_one_sided_only(),
+        );
+        let interactive_tari_address =
+            TariAddress::new_dual_address(view_key.pub_key, spend_key.pub_key, network, interactive_features);
         let resources = TransactionServiceResources {
             db: db.clone(),
             output_manager_service,
@@ -272,7 +282,9 @@ where
             outbound_message_service,
             connectivity,
             event_publisher: event_publisher.clone(),
-            wallet_identity,
+            interactive_tari_address,
+            one_sided_tari_address,
+            node_identity: node_identity.clone(),
             factories,
             config: config.clone(),
             shutdown_signal,
@@ -313,13 +325,6 @@ where
 
     #[allow(clippy::too_many_lines)]
     pub async fn start(mut self) -> Result<(), TransactionServiceError> {
-        // we need to ensure the wallet identity secret key is stored in the key manager
-        let _key_id = self
-            .resources
-            .transaction_key_manager_service
-            .import_key(self.resources.wallet_identity.node_identity.secret_key().clone())
-            .await?;
-
         let request_stream = self
             .request_stream
             .take()
@@ -432,7 +437,7 @@ where
                         }
                         Err(e) => {
                             warn!(target: LOG_TARGET, "Failed to handle incoming Transaction message: {} for NodeID: {}, Trace: {}",
-                                e, self.resources.wallet_identity.node_identity.node_id().short_str(), msg.dht_header.message_tag);
+                                e, self.resources.node_identity.node_id().short_str(), msg.dht_header.message_tag);
                             let _size = self.event_publisher.send(Arc::new(TransactionEvent::Error(format!("Error handling \
                                 Transaction Sender message: {:?}", e).to_string())));
                         }
@@ -455,12 +460,12 @@ where
                         Err(TransactionServiceError::TransactionDoesNotExistError) => {
                             trace!(target: LOG_TARGET, "Unable to handle incoming Transaction Reply message from NodeId: \
                             {} due to Transaction not existing. This usually means the message was a repeated message \
-                            from Store and Forward, Trace: {}", self.resources.wallet_identity.node_identity.node_id().short_str(),
+                            from Store and Forward, Trace: {}", self.resources.node_identity.node_id().short_str(),
                             msg.dht_header.message_tag);
                         },
                         Err(e) => {
                             warn!(target: LOG_TARGET, "Failed to handle incoming Transaction Reply message: {} \
-                            for NodeId: {}, Trace: {}", e, self.resources.wallet_identity.node_identity.node_id().short_str(),
+                            for NodeId: {}, Trace: {}", e, self.resources.node_identity.node_id().short_str(),
                             msg.dht_header.message_tag);
                             let _size = self.event_publisher.send(Arc::new(TransactionEvent::Error("Error handling \
                             Transaction Recipient Reply message".to_string())));
@@ -491,12 +496,12 @@ where
                         Err(TransactionServiceError::TransactionDoesNotExistError) => {
                             trace!(target: LOG_TARGET, "Unable to handle incoming Finalized Transaction message from NodeId: \
                             {} due to Transaction not existing. This usually means the message was a repeated message \
-                            from Store and Forward, Trace: {}", self.resources.wallet_identity.node_identity.node_id().short_str(),
+                            from Store and Forward, Trace: {}", self.resources.node_identity.node_id().short_str(),
                             msg.dht_header.message_tag);
                         },
                        Err(e) => {
                             warn!(target: LOG_TARGET, "Failed to handle incoming Transaction Finalized message: {} \
-                            for NodeID: {}, Trace: {}", e , self.resources.wallet_identity.node_identity.node_id().short_str(),
+                            for NodeID: {}, Trace: {}", e , self.resources.node_identity.node_id().short_str(),
                             msg.dht_header.message_tag.as_value());
                             let _size = self.event_publisher.send(Arc::new(TransactionEvent::Error("Error handling Transaction \
                             Finalized message".to_string(),)));
@@ -516,7 +521,7 @@ where
                     trace!(target: LOG_TARGET, "Handling Base Node Response, Trace: {}", msg.dht_header.message_tag);
                     let _result = self.handle_base_node_response(inner_msg).await.map_err(|e| {
                         warn!(target: LOG_TARGET, "Error handling base node service response from {}: {:?} for \
-                        NodeID: {}, Trace: {}", origin_public_key, e, self.resources.wallet_identity.node_identity.node_id().short_str(),
+                        NodeID: {}, Trace: {}", origin_public_key, e, self.resources.node_identity.node_id().short_str(),
                         msg.dht_header.message_tag.as_value());
                         e
                     });
@@ -1086,7 +1091,7 @@ where
         reply_channel: oneshot::Sender<Result<TransactionServiceResponse, TransactionServiceError>>,
     ) -> Result<(), TransactionServiceError> {
         let tx_id = TxId::new_random();
-        if destination.network() != self.resources.wallet_identity.address.network() {
+        if destination.network() != self.resources.interactive_tari_address.network() {
             let _result = reply_channel
                 .send(Err(TransactionServiceError::InvalidNetwork))
                 .inspect_err(|_| {
@@ -1095,7 +1100,14 @@ where
             return Err(TransactionServiceError::InvalidNetwork);
         }
         // If we're paying ourselves, let's complete and submit the transaction immediately
-        if self.resources.wallet_identity.address.comms_public_key() == destination.comms_public_key() {
+        if &self
+            .resources
+            .transaction_key_manager_service
+            .get_comms_key()
+            .await?
+            .pub_key ==
+            destination.comms_public_key()
+        {
             debug!(
                 target: LOG_TARGET,
                 "Received transaction with spend-to-self transaction"
@@ -1116,8 +1128,8 @@ where
                 transaction_broadcast_join_handles,
                 CompletedTransaction::new(
                     tx_id,
-                    self.resources.wallet_identity.address.clone(),
-                    self.resources.wallet_identity.address.clone(),
+                    self.resources.interactive_tari_address.clone(),
+                    self.resources.interactive_tari_address.clone(),
                     amount,
                     fee,
                     transaction,
@@ -1355,8 +1367,8 @@ where
             transaction_broadcast_join_handles,
             CompletedTransaction::new(
                 tx_id,
-                self.resources.wallet_identity.address.clone(),
-                self.resources.wallet_identity.address.clone(),
+                self.resources.interactive_tari_address.clone(),
+                self.resources.interactive_tari_address.clone(),
                 amount,
                 fee,
                 tx.clone(),
@@ -1450,7 +1462,7 @@ where
             )) => {
                 let completed_tx = CompletedTransaction::new(
                     tx_id,
-                    self.resources.wallet_identity.address.clone(),
+                    self.resources.interactive_tari_address.clone(),
                     recipient_address,
                     amount,
                     fee,
@@ -1595,7 +1607,7 @@ where
             HashSha256 PushHash(Box::new(hash)) Equal IfThen
                 PushPubKey(Box::new(destination.public_spend_key().clone()))
             Else
-                CheckHeightVerify(height) PushPubKey(Box::new(self.resources.wallet_identity.node_identity.public_key().clone()))
+                CheckHeightVerify(height) PushPubKey(Box::new(self.resources.node_identity.public_key().clone()))
             EndIf
         );
 
@@ -1709,7 +1721,13 @@ where
             .with_input_data(ExecutionStack::default())
             .with_covenant(covenant)
             .with_sender_offset_public_key(sender_offset_public_key)
-            .with_script_key(self.resources.wallet_identity.wallet_node_key_id.clone())
+            .with_script_key(
+                self.resources
+                    .transaction_key_manager_service
+                    .get_spend_key()
+                    .await?
+                    .key_id,
+            )
             .with_minimum_value_promise(minimum_value_promise)
             .sign_as_sender_and_receiver(
                 &self.resources.transaction_key_manager_service,
@@ -1772,7 +1790,7 @@ where
             transaction_broadcast_join_handles,
             CompletedTransaction::new(
                 tx_id,
-                self.resources.wallet_identity.address.clone(),
+                self.resources.interactive_tari_address.clone(),
                 destination,
                 amount,
                 fee,
@@ -1840,6 +1858,13 @@ where
         // This call is needed to advance the state from `SingleRoundMessageReady` to `SingleRoundMessageReady`,
         // but the returned value is not used. We have to wait until the sender transaction protocol creates a
         // sender_offset_private_key for us, so we can use it to create the shared secret
+        let key = self
+            .resources
+            .transaction_key_manager_service
+            .get_next_key(TransactionKeyManagerBranch::SenderOffsetLedger.get_branch_key())
+            .await?;
+
+        stp.change_recipient_sender_offset_private_key(key.key_id)?;
         let _single_round_sender_data = stp
             .build_single_round_message(&self.resources.transaction_key_manager_service)
             .await
@@ -1941,11 +1966,9 @@ where
                 payment_id.clone(),
             )
             .await?
-            .with_input_data(inputs!(PublicKey::from_secret_key(
-                self.resources.wallet_identity.node_identity.secret_key()
-            )))
+            .with_input_data(Default::default())
             .with_sender_offset_public_key(sender_offset_public_key)
-            .with_script_key(self.resources.wallet_identity.wallet_node_key_id.clone())
+            .with_script_key(KeyId::Zero)
             .with_minimum_value_promise(minimum_value_promise)
             .sign_as_sender_and_receiver(
                 &self.resources.transaction_key_manager_service,
@@ -2002,7 +2025,7 @@ where
             transaction_broadcast_join_handles,
             CompletedTransaction::new(
                 tx_id,
-                self.resources.wallet_identity.address.clone(),
+                self.resources.one_sided_tari_address.clone(),
                 dest_address,
                 amount,
                 fee,
@@ -2039,14 +2062,8 @@ where
             JoinHandle<Result<TxId, TransactionServiceProtocolError<TxId>>>,
         >,
     ) -> Result<TxId, TransactionServiceError> {
-        if destination.network() != self.resources.wallet_identity.address.network() {
+        if destination.network() != self.resources.one_sided_tari_address.network() {
             return Err(TransactionServiceError::InvalidNetwork);
-        }
-        if self.resources.wallet_identity.node_identity.public_key() == destination.comms_public_key() {
-            warn!(target: LOG_TARGET, "One-sided spend-to-self transactions not supported");
-            return Err(TransactionServiceError::OneSidedTransactionError(
-                "One-sided spend-to-self transactions not supported".to_string(),
-            ));
         }
         let dest_pubkey = destination.public_spend_key().clone();
         self.send_one_sided_or_stealth(
@@ -2124,23 +2141,28 @@ where
             stp.get_single_round_message(&self.resources.transaction_key_manager_service)
                 .await?,
         );
-        let (spend_key_id, public_spend_key, _script_key_id, _) = self
+        let (commitment_mask_key, _) = self
             .resources
             .transaction_key_manager_service
-            .get_next_spend_and_script_key_ids()
+            .get_next_commitment_mask_and_script_key()
             .await?;
 
-        let recovery_key_id = self.resources.transaction_key_manager_service.get_view_key_id().await?;
+        let recovery_key_id = self
+            .resources
+            .transaction_key_manager_service
+            .get_view_key()
+            .await?
+            .key_id;
 
         let recovery_key_id = match claim_public_key {
             Some(ref claim_public_key) => {
                 // For claimable L2 burn transactions, we derive a shared secret and encryption key from a nonce (in
                 // this case a new spend key from the key manager) and the provided claim public key. The public
-                // nonce/spend_key is returned back to the caller.
+                // nonce/commitment_mask_key is returned back to the caller.
                 let shared_secret = self
                     .resources
                     .transaction_key_manager_service
-                    .get_diffie_hellman_shared_secret(&spend_key_id, claim_public_key)
+                    .get_diffie_hellman_shared_secret(&commitment_mask_key.key_id, claim_public_key)
                     .await?;
                 let encryption_key = shared_secret_to_output_encryption_key(&shared_secret)?;
                 self.resources
@@ -2161,7 +2183,7 @@ where
                 tx_id,
                 TransactionServiceError::InvalidKeyId("Missing sender offset keyid".to_string()),
             ))?;
-        let output = WalletOutputBuilder::new(amount, spend_key_id.clone())
+        let output = WalletOutputBuilder::new(amount, commitment_mask_key.key_id.clone())
             .with_features(
                 sender_message
                     .single()
@@ -2179,9 +2201,7 @@ where
                 PaymentId::Empty,
             )
             .await?
-            .with_input_data(inputs!(PublicKey::from_secret_key(
-                self.resources.wallet_identity.node_identity.secret_key()
-            )))
+            .with_input_data(Default::default())
             .with_sender_offset_public_key(
                 sender_message
                     .single()
@@ -2192,7 +2212,7 @@ where
                     .sender_offset_public_key
                     .clone(),
             )
-            .with_script_key(self.resources.wallet_identity.wallet_node_key_id.clone())
+            .with_script_key(KeyId::Zero)
             .with_minimum_value_promise(
                 sender_message
                     .single()
@@ -2229,7 +2249,7 @@ where
             ownership_proof = Some(
                 self.resources
                     .transaction_key_manager_service
-                    .generate_burn_proof(&spend_key_id, &amount.into(), &claim_public_key)
+                    .generate_burn_proof(&commitment_mask_key.key_id, &amount.into(), &claim_public_key)
                     .await?,
             );
         }
@@ -2267,7 +2287,7 @@ where
             transaction_broadcast_join_handles,
             CompletedTransaction::new(
                 tx_id,
-                self.resources.wallet_identity.address.clone(),
+                self.resources.interactive_tari_address.clone(),
                 TariAddress::default(),
                 amount,
                 fee,
@@ -2286,7 +2306,7 @@ where
 
         Ok((tx_id, BurntProof {
             // Key used to claim the burn on L2
-            reciprocal_claim_public_key: public_spend_key,
+            reciprocal_claim_public_key: commitment_mask_key.pub_key,
             commitment,
             ownership_proof,
             range_proof,
@@ -2312,7 +2332,7 @@ where
         let output_features =
             OutputFeatures::for_validator_node_registration(validator_node_public_key, validator_node_signature);
         self.send_transaction(
-            self.resources.wallet_identity.address.clone(),
+            self.resources.interactive_tari_address.clone(),
             amount,
             selection_criteria,
             output_features,
@@ -2341,7 +2361,7 @@ where
         reply_channel: oneshot::Sender<Result<TransactionServiceResponse, TransactionServiceError>>,
     ) -> Result<(), TransactionServiceError> {
         self.send_transaction(
-            self.resources.wallet_identity.address.clone(),
+            self.resources.interactive_tari_address.clone(),
             0.into(),
             selection_criteria,
             OutputFeatures::for_template_registration(template_registration),
@@ -2373,7 +2393,7 @@ where
             JoinHandle<Result<TxId, TransactionServiceProtocolError<TxId>>>,
         >,
     ) -> Result<TxId, TransactionServiceError> {
-        if destination.network() != self.resources.wallet_identity.address.network() {
+        if destination.network() != self.resources.one_sided_tari_address.network() {
             return Err(TransactionServiceError::InvalidNetwork);
         }
 
@@ -2855,7 +2875,7 @@ where
             // interactive and its the same network
             let source_address = TariAddress::new_single_address(
                 source_pubkey,
-                self.resources.wallet_identity.network(),
+                self.resources.interactive_tari_address.network(),
                 TariAddressFeatures::INTERACTIVE,
             );
             let protocol = TransactionReceiveProtocol::new(
@@ -2915,7 +2935,7 @@ where
         // but we know its interactive, so make the view key 0, and the spend key the source public key.
         let source_address = TariAddress::new_single_address(
             source_pubkey,
-            self.resources.wallet_identity.address.network(),
+            self.resources.interactive_tari_address.network(),
             TariAddressFeatures::INTERACTIVE,
         );
         let sender = match self.finalized_transaction_senders.get_mut(&tx_id) {
@@ -3383,7 +3403,7 @@ where
             tx_id,
             value,
             source_address,
-            self.resources.wallet_identity.address.clone(),
+            self.resources.interactive_tari_address.clone(),
             message,
             import_status.clone(),
             current_height,
@@ -3482,8 +3502,8 @@ where
             transaction_broadcast_join_handles,
             CompletedTransaction::new(
                 tx_id,
-                self.resources.wallet_identity.address.clone(),
-                self.resources.wallet_identity.address.clone(),
+                self.resources.interactive_tari_address.clone(),
+                self.resources.interactive_tari_address.clone(),
                 amount,
                 fee,
                 tx,
@@ -3524,7 +3544,9 @@ pub struct TransactionServiceResources<TBackend, TWalletConnectivity, TKeyManage
     pub outbound_message_service: OutboundMessageRequester,
     pub connectivity: TWalletConnectivity,
     pub event_publisher: TransactionEventSender,
-    pub wallet_identity: WalletIdentity,
+    pub interactive_tari_address: TariAddress,
+    pub one_sided_tari_address: TariAddress,
+    pub node_identity: Arc<NodeIdentity>,
     pub consensus_manager: ConsensusManager,
     pub factories: CryptoFactories,
     pub config: TransactionServiceConfig,

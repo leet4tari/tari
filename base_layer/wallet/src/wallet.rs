@@ -29,7 +29,7 @@ use log::*;
 use rand::rngs::OsRng;
 use tari_common::configuration::bootstrap::ApplicationType;
 use tari_common_types::{
-    tari_address::TariAddress,
+    tari_address::{TariAddress, TariAddressFeatures},
     transaction::{ImportStatus, TxId},
     types::{ComAndPubSignature, Commitment, PrivateKey, PublicKey, RangeProof, SignatureWithDomain},
     wallet_types::WalletType,
@@ -64,7 +64,7 @@ use tari_crypto::{hash_domain, signatures::SchnorrSignatureError};
 use tari_key_manager::{
     cipher_seed::CipherSeed,
     key_manager::KeyManager,
-    key_manager_service::{storage::database::KeyManagerBackend, KeyDigest, KeyManagerBranch},
+    key_manager_service::{storage::database::KeyManagerBackend, KeyDigest, KeyManagerBranch, KeyManagerServiceError},
     mnemonic::{Mnemonic, MnemonicLanguage},
     SeedWords,
 };
@@ -137,6 +137,7 @@ pub struct Wallet<T, U, V, W, TKeyManagerInterface> {
     pub db: WalletDatabase<T>,
     pub output_db: OutputManagerDatabase<V>,
     pub factories: CryptoFactories,
+    wallet_type: WalletType,
     _u: PhantomData<U>,
     _v: PhantomData<V>,
     _w: PhantomData<W>,
@@ -201,13 +202,12 @@ where
                 output_manager_backend.clone(),
                 factories.clone(),
                 config.network.into(),
-                node_identity.clone(),
             ))
             .add_initializer(TransactionKeyManagerInitializer::new(
                 key_manager_backend,
                 master_seed,
                 factories.clone(),
-                wallet_type,
+                wallet_type.clone(),
             ))
             .add_initializer(TransactionServiceInitializer::<U, T, TKeyManagerInterface>::new(
                 config.transaction_service_config,
@@ -242,7 +242,6 @@ where
             .add_initializer(UtxoScannerServiceInitializer::<T, TKeyManagerInterface>::new(
                 wallet_database.clone(),
                 factories.clone(),
-                node_identity.clone(),
                 config.network,
             ));
 
@@ -320,13 +319,18 @@ where
         } else {
             None
         };
+        let spend_key = key_manager_handle.get_spend_key().await?;
 
-        persist_one_sided_payment_script_for_node_identity(&mut output_manager_handle, &node_identity)
-            .await
-            .map_err(|e| {
-                error!(target: LOG_TARGET, "{:?}", e);
-                e
-            })?;
+        persist_one_sided_payment_script_for_node_identity(
+            &mut output_manager_handle,
+            &spend_key.pub_key,
+            spend_key.key_id,
+        )
+        .await
+        .map_err(|e| {
+            error!(target: LOG_TARGET, "{:?}", e);
+            e
+        })?;
 
         wallet_database.set_node_features(comms.node_identity().features())?;
         let identity_sig = comms.node_identity().identity_signature_read().as_ref().cloned();
@@ -357,6 +361,7 @@ where
             db: wallet_database,
             output_db: output_manager_database,
             factories,
+            wallet_type,
             _u: PhantomData,
             _v: PhantomData,
             _w: PhantomData,
@@ -476,25 +481,40 @@ where
         }
     }
 
-    pub async fn get_wallet_address(&self) -> Result<TariAddress, WalletError> {
-        let view_key_id = self.key_manager_service.get_view_key_id().await?;
-        let view_key = self.key_manager_service.get_public_key_at_key_id(&view_key_id).await?;
-        Ok(TariAddress::new_dual_address_with_default_features(
-            view_key.clone(),
-            self.comms.node_identity().public_key().clone(),
+    pub async fn get_wallet_interactive_address(&self) -> Result<TariAddress, KeyManagerServiceError> {
+        let view_key = self.key_manager_service.get_view_key().await?;
+        let comms_key = self.key_manager_service.get_comms_key().await?;
+        let features = match self.wallet_type {
+            WalletType::DerivedKeys => TariAddressFeatures::default(),
+            WalletType::Ledger(_) | WalletType::ProvidedKeys(_) => TariAddressFeatures::create_interactive_only(),
+        };
+        Ok(TariAddress::new_dual_address(
+            view_key.pub_key,
+            comms_key.pub_key,
             self.network.as_network(),
+            features,
+        ))
+    }
+
+    pub async fn get_wallet_one_sided_address(&self) -> Result<TariAddress, KeyManagerServiceError> {
+        let view_key = self.key_manager_service.get_view_key().await?;
+        let spend_key = self.key_manager_service.get_spend_key().await?;
+        Ok(TariAddress::new_dual_address(
+            view_key.pub_key,
+            spend_key.pub_key,
+            self.network.as_network(),
+            TariAddressFeatures::create_one_sided_only(),
         ))
     }
 
     pub async fn get_wallet_id(&self) -> Result<WalletIdentity, WalletError> {
-        let view_key_id = self.key_manager_service.get_view_key_id().await?;
-        let view_key = self.key_manager_service.get_public_key_at_key_id(&view_key_id).await?;
-        let address = TariAddress::new_dual_address_with_default_features(
-            view_key.clone(),
-            self.comms.node_identity().public_key().clone(),
-            self.network.as_network(),
-        );
-        Ok(WalletIdentity::new(self.comms.node_identity(), address))
+        let address_interactive = self.get_wallet_interactive_address().await?;
+        let address_one_sided = self.get_wallet_one_sided_address().await?;
+        Ok(WalletIdentity::new(
+            self.comms.node_identity(),
+            address_interactive,
+            address_one_sided,
+        ))
     }
 
     pub fn get_software_updater(&self) -> Option<SoftwareUpdaterHandle> {
@@ -820,18 +840,16 @@ pub fn derive_comms_secret_key(master_seed: &CipherSeed) -> Result<CommsSecretKe
 /// using old node identities.
 async fn persist_one_sided_payment_script_for_node_identity(
     output_manager_service: &mut OutputManagerHandle,
-    node_identity: &Arc<NodeIdentity>,
+    spend_key: &PublicKey,
+    spend_key_id: TariKeyId,
 ) -> Result<(), WalletError> {
-    let script = push_pubkey_script(node_identity.public_key());
-    let wallet_node_key_id = TariKeyId::Imported {
-        key: node_identity.public_key().clone(),
-    };
+    let script = push_pubkey_script(spend_key);
     let known_script = KnownOneSidedPaymentScript {
         script_hash: script
             .as_hash::<Blake2b<U32>>()
             .map_err(|e| WalletError::OutputManagerError(OutputManagerError::ScriptError(e)))?
             .to_vec(),
-        script_key_id: wallet_node_key_id.clone(),
+        script_key_id: spend_key_id,
         script,
         input: ExecutionStack::default(),
         script_lock_height: 0,

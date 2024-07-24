@@ -31,9 +31,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use blake2::Blake2b;
 use chrono::{DateTime, Utc};
-use digest::{consts::U32, crypto_common::rand_core::OsRng, Digest};
+use digest::{crypto_common::rand_core::OsRng, Digest};
 use futures::FutureExt;
 use log::*;
 use minotari_app_grpc::tls::certs::{generate_self_signed_certs, print_warning, write_cert_to_disk};
@@ -64,9 +63,7 @@ use tari_comms::{
 };
 use tari_comms_dht::{envelope::NodeDestination, DhtDiscoveryRequester};
 use tari_core::{
-    consensus::DomainSeparatedConsensusHasher,
     covenants::Covenant,
-    one_sided::FaucetHashDomain,
     transactions::{
         key_manager::TransactionKeyManagerInterface,
         tari_amount::{uT, MicroMinotari, Minotari},
@@ -807,27 +804,18 @@ pub async fn command_runner(
                     continue;
                 }
 
-                let wallet_spend_key_id = wallet.get_wallet_id().await?.wallet_node_key_id.clone();
-                let wallet_public_spend_key = key_manager_service
-                    .get_public_key_at_key_id(&wallet_spend_key_id)
-                    .await?;
-                let (script_nonce_key_id, public_script_nonce_key) = key_manager_service.get_random_key().await?;
-                let (sender_offset_key_id, public_sender_offset_key) = key_manager_service.get_random_key().await?;
-                let (sender_offset_nonce_key_id, public_sender_offset_nonce_key) =
-                    key_manager_service.get_random_key().await?;
+                let wallet_spend_key = wallet.key_manager_service.get_spend_key().await?;
+                let script_nonce_key = key_manager_service.get_random_key().await?;
+                let sender_offset_key = key_manager_service.get_random_key().await?;
+                let sender_offset_nonce = key_manager_service.get_random_key().await?;
 
                 // Read session info
                 let session_info = read_session_info(args.input_file.clone())?;
 
                 let commitment = Commitment::from_hex(&session_info.commitment_to_spend)?;
-                let commitment_hash: [u8; 32] =
-                    DomainSeparatedConsensusHasher::<FaucetHashDomain, Blake2b<U32>>::new("com_hash")
-                        .chain(&commitment)
-                        .finalize()
-                        .into();
                 let shared_secret = key_manager_service
                     .get_diffie_hellman_shared_secret(
-                        &sender_offset_key_id,
+                        &sender_offset_key.key_id,
                         session_info
                             .recipient_address
                             .public_view_key()
@@ -837,16 +825,16 @@ pub async fn command_runner(
                 let shared_secret_public_key = PublicKey::from_canonical_bytes(shared_secret.as_bytes())?;
 
                 let script_input_signature = key_manager_service
-                    .sign_script_message(&wallet_spend_key_id, &commitment_hash)
+                    .sign_script_message(&wallet_spend_key.key_id, commitment.as_bytes())
                     .await?;
 
                 let out_dir = out_dir(&session_info.session_id)?;
                 let step_2_outputs_for_leader = Step2OutputsForLeader {
                     script_input_signature,
-                    wallet_public_spend_key,
-                    public_script_nonce_key,
-                    public_sender_offset_key,
-                    public_sender_offset_nonce_key,
+                    wallet_public_spend_key: wallet_spend_key.pub_key,
+                    public_script_nonce_key: script_nonce_key.pub_key,
+                    public_sender_offset_key: sender_offset_key.pub_key,
+                    public_sender_offset_nonce_key: sender_offset_nonce.pub_key,
                     dh_shared_secret_public_key: shared_secret_public_key,
                 };
                 let out_file_leader = out_dir.join(get_file_name(STEP_2_LEADER, Some(args.alias.clone())));
@@ -855,10 +843,10 @@ pub async fn command_runner(
 
                 let step_2_outputs_for_self = Step2OutputsForSelf {
                     alias: args.alias.clone(),
-                    wallet_spend_key_id,
-                    script_nonce_key_id,
-                    sender_offset_key_id,
-                    sender_offset_nonce_key_id,
+                    wallet_spend_key_id: wallet_spend_key.key_id,
+                    script_nonce_key_id: script_nonce_key.key_id,
+                    sender_offset_key_id: sender_offset_key.key_id,
+                    sender_offset_nonce_key_id: sender_offset_nonce.key_id,
                 };
                 let out_file_self = out_dir.join(get_file_name(STEP_2_SELF, None));
                 write_json_object_to_file_as_line(&out_file_self, true, session_info.clone())?;

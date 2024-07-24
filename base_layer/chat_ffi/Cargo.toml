@@ -3,7 +3,7 @@ name = "minotari_chat_ffi"
 authors = ["The Tari Development Community"]
 description = "Tari cryptocurrency chat C FFI bindings"
 license = "BSD-3-Clause"
-version = "1.0.0-pre.16"
+version = "1.0.0-pre.17"
 edition = "2018"
 
 [dependencies]
@@ -24,7 +24,7 @@ thiserror = "1.0.26"
 tokio = "1.23"
 
 [target.'cfg(target_os="android")'.dependencies]
-openssl = { version = "0.10.55", features = ["vendored"] }
+openssl = { version = "0.10.66", features = ["vendored"] }
 
 [lib]
 crate-type = ["staticlib", "cdylib"]

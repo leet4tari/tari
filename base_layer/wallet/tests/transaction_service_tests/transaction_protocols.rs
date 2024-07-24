@@ -47,12 +47,12 @@ use minotari_wallet::{
             sqlite_db::TransactionServiceSqliteDatabase,
         },
     },
-    util::{wallet_identity::WalletIdentity, watch::Watch},
+    util::watch::Watch,
 };
 use rand::{rngs::OsRng, RngCore};
 use tari_common::configuration::Network;
 use tari_common_types::{
-    tari_address::TariAddress,
+    tari_address::{TariAddress, TariAddressFeatures},
     transaction::{TransactionDirection, TransactionStatus, TxId},
 };
 use tari_comms::{
@@ -86,7 +86,6 @@ use tari_core::{
     },
     txn_schema,
 };
-use tari_key_manager::key_manager_service::KeyManagerInterface;
 use tari_service_framework::{reply_channel, reply_channel::Receiver};
 use tari_shutdown::Shutdown;
 use tari_test_utils::random;
@@ -159,17 +158,22 @@ pub async fn setup() -> (
     let shutdown = Shutdown::new();
     let network = Network::LocalNet;
     let consensus_manager = ConsensusManager::builder(network).build().unwrap();
-    let view_key = core_key_manager_service_handle.get_view_key_id().await.unwrap();
-    let view_key = core_key_manager_service_handle
-        .get_public_key_at_key_id(&view_key)
-        .await
-        .unwrap();
-    let tari_address = TariAddress::new_dual_address_with_default_features(
-        view_key,
-        client_node_identity.public_key().clone(),
+    let view_key = core_key_manager_service_handle.get_view_key().await.unwrap();
+    let comms_key = core_key_manager_service_handle.get_comms_key().await.unwrap();
+    let spend_key = core_key_manager_service_handle.get_spend_key().await.unwrap();
+    let interactive_features = if spend_key == comms_key {
+        TariAddressFeatures::create_interactive_and_one_sided()
+    } else {
+        TariAddressFeatures::create_one_sided_only()
+    };
+    let one_sided_tari_address = TariAddress::new_dual_address(
+        view_key.pub_key.clone(),
+        comms_key.pub_key,
         network,
+        TariAddressFeatures::create_one_sided_only(),
     );
-    let wallet_identity = WalletIdentity::new(client_node_identity.clone(), tari_address);
+    let interactive_tari_address =
+        TariAddress::new_dual_address(view_key.pub_key, spend_key.pub_key, network, interactive_features);
     let resources = TransactionServiceResources {
         db,
         output_manager_service: output_manager_service_handle,
@@ -177,7 +181,9 @@ pub async fn setup() -> (
         outbound_message_service: outbound_message_requester,
         connectivity: wallet_connectivity.clone(),
         event_publisher: ts_event_publisher,
-        wallet_identity,
+        one_sided_tari_address,
+        interactive_tari_address,
+        node_identity: client_node_identity.clone(),
         consensus_manager,
         factories: CryptoFactories::default(),
         config: TransactionServiceConfig {
