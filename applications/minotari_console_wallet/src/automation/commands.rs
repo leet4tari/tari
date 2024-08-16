@@ -32,29 +32,36 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use digest::{crypto_common::rand_core::OsRng, Digest};
+use digest::Digest;
 use futures::FutureExt;
 use log::*;
 use minotari_app_grpc::tls::certs::{generate_self_signed_certs, print_warning, write_cert_to_disk};
 use minotari_wallet::{
     connectivity_service::WalletConnectivityInterface,
-    output_manager_service::{handle::OutputManagerHandle, UtxoSelectionCriteria},
+    output_manager_service::{
+        handle::{OutputManagerEvent, OutputManagerHandle},
+        UtxoSelectionCriteria,
+    },
     transaction_service::{
         handle::{TransactionEvent, TransactionServiceHandle},
         storage::models::WalletTransaction,
     },
+    utxo_scanner_service::handle::UtxoScannerEvent,
     TransactionStage,
     WalletConfig,
     WalletSqlite,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use sha2::Sha256;
+use tari_common::configuration::Network;
 use tari_common_types::{
     burnt_proof::BurntProof,
     emoji::EmojiId,
+    key_branches::TransactionKeyManagerBranch,
     tari_address::TariAddress,
     transaction::TxId,
     types::{Commitment, FixedHash, HashOutput, PrivateKey, PublicKey, Signature},
+    wallet_types::WalletType,
 };
 use tari_comms::{
     connectivity::{ConnectivityEvent, ConnectivityRequester},
@@ -63,6 +70,7 @@ use tari_comms::{
 };
 use tari_comms_dht::{envelope::NodeDestination, DhtDiscoveryRequester};
 use tari_core::{
+    blocks::pre_mine::get_pre_mine_items,
     covenants::Covenant,
     transactions::{
         key_manager::TransactionKeyManagerInterface,
@@ -80,13 +88,10 @@ use tari_core::{
         },
     },
 };
-use tari_crypto::{
-    keys::SecretKey,
-    ristretto::{pedersen::PedersenCommitment, RistrettoSecretKey},
-};
-use tari_key_manager::key_manager_service::KeyManagerInterface;
+use tari_crypto::ristretto::{pedersen::PedersenCommitment, RistrettoSecretKey};
+use tari_key_manager::key_manager_service::{KeyId, KeyManagerInterface};
 use tari_script::{script, CheckSigSchnorrSignature};
-use tari_utilities::{encoding::Base58, hex::Hex, ByteArray};
+use tari_utilities::{hex::Hex, ByteArray};
 use tokio::{
     sync::{broadcast, mpsc},
     time::{sleep, timeout},
@@ -96,6 +101,7 @@ use super::error::CommandError;
 use crate::{
     automation::{
         utils::{
+            create_pre_mine_output_dir,
             get_file_name,
             move_session_file_to_session_dir,
             out_dir,
@@ -105,26 +111,26 @@ use crate::{
             write_json_object_to_file_as_line,
             write_to_json_file,
         },
-        Step1SessionInfo,
-        Step2OutputsForLeader,
-        Step2OutputsForSelf,
-        Step3OutputsForParties,
-        Step3OutputsForSelf,
-        Step4OutputsForLeader,
+        PreMineSpendStep1SessionInfo,
+        PreMineSpendStep2OutputsForLeader,
+        PreMineSpendStep2OutputsForSelf,
+        PreMineSpendStep3OutputsForParties,
+        PreMineSpendStep3OutputsForSelf,
+        PreMineSpendStep4OutputsForLeader,
     },
     cli::{CliCommands, MakeItRainTransactionType},
     utils::db::{CUSTOM_BASE_NODE_ADDRESS_KEY, CUSTOM_BASE_NODE_PUBLIC_KEY_KEY},
 };
 
 pub const LOG_TARGET: &str = "wallet::automation::commands";
-// Faucet file names
+// Pre-mine file names
 pub(crate) const FILE_EXTENSION: &str = "json";
-pub(crate) const SESSION_INFO: &str = "step_1_session_info";
-pub(crate) const STEP_2_LEADER: &str = "step_2_for_leader_from_";
-pub(crate) const STEP_2_SELF: &str = "step_2_for_self";
-pub(crate) const STEP_3_SELF: &str = "step_3_for_self";
-pub(crate) const STEP_3_PARTIES: &str = "step_3_for_parties";
-pub(crate) const STEP_4_LEADER: &str = "step_4_for_leader_from_";
+pub(crate) const SPEND_SESSION_INFO: &str = "step_1_session_info";
+pub(crate) const SPEND_STEP_2_LEADER: &str = "step_2_for_leader_from_";
+pub(crate) const SPEND_STEP_2_SELF: &str = "step_2_for_self";
+pub(crate) const SPEND_STEP_3_SELF: &str = "step_3_for_self";
+pub(crate) const SPEND_STEP_3_PARTIES: &str = "step_3_for_parties";
+pub(crate) const SPEND_STEP_4_LEADER: &str = "step_4_for_leader_from_";
 
 #[derive(Debug)]
 pub struct SentTransaction {}
@@ -199,6 +205,19 @@ async fn encumber_aggregate_utxo(
         .map_err(CommandError::TransactionServiceError)
 }
 
+async fn spend_backup_pre_mine_utxo(
+    mut wallet_transaction_service: TransactionServiceHandle,
+    fee_per_gram: MicroMinotari,
+    output_hash: HashOutput,
+    expected_commitment: PedersenCommitment,
+    recipient_address: TariAddress,
+) -> Result<TxId, CommandError> {
+    wallet_transaction_service
+        .spend_backup_pre_mine_utxo(fee_per_gram, output_hash, expected_commitment, recipient_address)
+        .await
+        .map_err(CommandError::TransactionServiceError)
+}
+
 /// finalises an already encumbered a n-of-m transaction
 async fn finalise_aggregate_utxo(
     mut wallet_transaction_service: TransactionServiceHandle,
@@ -207,6 +226,8 @@ async fn finalise_aggregate_utxo(
     script_signatures: Vec<Signature>,
     wallet_script_secret_key: PrivateKey,
 ) -> Result<TxId, CommandError> {
+    trace!(target: LOG_TARGET, "finalise_aggregate_utxo: start");
+
     let mut meta_sig = Signature::default();
     for sig in &meta_signatures {
         meta_sig = &meta_sig + sig;
@@ -215,6 +236,7 @@ async fn finalise_aggregate_utxo(
     for sig in &script_signatures {
         script_sig = &script_sig + sig;
     }
+    trace!(target: LOG_TARGET, "finalise_aggregate_utxo: aggregated signatures");
 
     wallet_transaction_service
         .finalize_aggregate_utxo(tx_id, meta_sig, script_sig, wallet_script_secret_key)
@@ -742,66 +764,188 @@ pub async fn command_runner(
                     Err(e) => eprintln!("BurnMinotari error! {}", e),
                 }
             },
-            FaucetGenerateSessionInfo(args) => {
-                let commitment = if let Ok(val) = Commitment::from_hex(&args.commitment) {
-                    val
-                } else {
-                    eprintln!("\nError: Invalid 'commitment' provided!\n");
-                    continue;
-                };
-                let hash = if let Ok(val) = FixedHash::from_hex(&args.output_hash) {
-                    val
-                } else {
-                    eprintln!("\nError: Invalid 'output_hash' provided!\n");
-                    continue;
+            PreMineSpendGetOutputStatus => {
+                let pre_mine_outputs = get_all_embedded_pre_mine_outputs()?;
+                let output_hashes: Vec<HashOutput> = pre_mine_outputs.iter().map(|v| v.hash()).collect();
+                let unspent_outputs = transaction_service.fetch_unspent_outputs(output_hashes).await?;
+
+                let pre_mine_items = match get_pre_mine_items(Network::get_current_or_user_setting_or_default()).await {
+                    Ok(items) => items,
+                    Err(e) => {
+                        eprintln!("\nError: {}\n", e);
+                        return Ok(());
+                    },
                 };
 
+                let (session_id, out_dir) = match create_pre_mine_output_dir(Some("pre_mine_status")) {
+                    Ok(values) => values,
+                    Err(e) => {
+                        eprintln!("\nError: {}\n", e);
+                        return Ok(());
+                    },
+                };
+                let csv_file_name = "pre_mine_items_with_status.csv";
+                let csv_out_file = out_dir.join(csv_file_name);
+                let mut file_stream =
+                    File::create(&csv_out_file).expect("Could not create 'pre_mine_items_with_status.csv'");
+                if let Err(e) =
+                    file_stream.write_all("index,value,maturity,fail_safe_height,beneficiary,spent_status\n".as_bytes())
+                {
+                    eprintln!("\nError: Could not write pre-mine header ({})\n", e);
+                    return Ok(());
+                }
+
+                for (index, item) in pre_mine_items.iter().enumerate() {
+                    let unspent = unspent_outputs
+                        .iter()
+                        .any(|u| u.commitment() == &pre_mine_outputs[index].commitment);
+                    if let Err(e) = file_stream.write_all(
+                        format!(
+                            "{},{},{},{},{},{}\n",
+                            index,
+                            item.value,
+                            item.maturity,
+                            item.maturity + item.fail_safe_height,
+                            item.beneficiary,
+                            if unspent { "unspent" } else { "spent" },
+                        )
+                        .as_bytes(),
+                    ) {
+                        eprintln!("\nError: Could not write pre-mine item ({})\n", e);
+                        return Ok(());
+                    }
+                }
+
+                println!();
+                println!("Concluded step 0 'pre-mine-spend-get-output-status'");
+                println!("Your session ID is:                    '{}'", session_id);
+                println!("Your session's output directory is:    '{}'", out_dir.display());
+                println!("Pre-mine output spent status saved to: '{}'", csv_file_name);
+                println!();
+            },
+            PreMineSpendSessionInfo(args) => {
+                match *key_manager_service.get_wallet_type().await {
+                    WalletType::Ledger(_) => {},
+                    _ => {
+                        eprintln!("\nError: Wallet type must be 'Ledger' to spend pre-mine outputs!\n");
+                        break;
+                    },
+                }
+
+                let embedded_output = match get_embedded_pre_mine_outputs(vec![args.output_index]) {
+                    Ok(outputs) => outputs[0].clone(),
+                    Err(e) => {
+                        eprintln!("\nError: {}\n", e);
+                        break;
+                    },
+                };
+                let commitment = embedded_output.commitment.clone();
+                let output_hash = embedded_output.hash();
+
                 if args.verify_unspent_outputs {
-                    let unspent_outputs = transaction_service.fetch_unspent_outputs(vec![hash]).await?;
+                    let unspent_outputs = transaction_service.fetch_unspent_outputs(vec![output_hash]).await?;
                     if unspent_outputs.is_empty() {
                         eprintln!(
                             "\nError: Output with output_hash '{}' has already been spent!\n",
-                            args.output_hash
+                            output_hash
                         );
-                        continue;
+                        break;
                     }
                     if unspent_outputs[0].commitment() != &commitment {
                         eprintln!(
                             "\nError: Mismatched commitment '{}' and output_hash '{}'; not for the same output!\n",
-                            args.commitment, args.output_hash
+                            commitment.to_hex(),
+                            output_hash
                         );
-                        continue;
+                        break;
                     }
                 }
 
-                let mut session_id = PrivateKey::random(&mut OsRng).to_base58();
-                session_id.truncate(16);
-                let session_info = Step1SessionInfo {
+                let (session_id, out_dir) = match create_pre_mine_output_dir(None) {
+                    Ok(values) => values,
+                    Err(e) => {
+                        eprintln!("\nError: {}\n", e);
+                        return Ok(());
+                    },
+                };
+                let session_info = PreMineSpendStep1SessionInfo {
                     session_id: session_id.clone(),
-                    commitment_to_spend: args.commitment,
-                    output_hash: args.output_hash,
+                    commitment_to_spend: commitment.to_hex(),
+                    output_hash: output_hash.to_hex(),
                     recipient_address: args.recipient_address,
                     fee_per_gram: args.fee_per_gram,
+                    output_index: args.output_index,
                 };
-                let out_dir = out_dir(&session_info.session_id)?;
-                let out_file = out_dir.join(get_file_name(SESSION_INFO, None));
+
+                let out_file = out_dir.join(get_file_name(SPEND_SESSION_INFO, None));
                 write_to_json_file(&out_file, true, session_info)?;
                 println!();
-                println!("Concluded step 1 'faucet-generate-session-info'");
+                println!("Concluded step 1 'pre-mine-spend-session-info'");
                 println!("Your session ID is:                 '{}'", session_id);
                 println!("Your session's output directory is: '{}'", out_dir.display());
                 println!("Session info saved to:              '{}'", out_file.display());
-                println!("Send '{}' to parties for step 2", get_file_name(SESSION_INFO, None));
+                println!(
+                    "Send '{}' to parties for step 2",
+                    get_file_name(SPEND_SESSION_INFO, None)
+                );
                 println!();
             },
-            FaucetCreatePartyDetails(args) => {
+            PreMineSpendBackupUtxo(args) => {
+                match *key_manager_service.get_wallet_type().await {
+                    WalletType::Ledger(_) => {},
+                    _ => {
+                        eprintln!("\nError: Wallet type must be 'Ledger' to spend pre-mine outputs!\n");
+                        break;
+                    },
+                }
+
+                let embedded_output = match get_embedded_pre_mine_outputs(vec![args.output_index]) {
+                    Ok(outputs) => outputs[0].clone(),
+                    Err(e) => {
+                        eprintln!("\nError: {}\n", e);
+                        break;
+                    },
+                };
+                let commitment = embedded_output.commitment.clone();
+                let output_hash = embedded_output.hash();
+
+                match spend_backup_pre_mine_utxo(
+                    transaction_service.clone(),
+                    args.fee_per_gram,
+                    output_hash,
+                    commitment.clone(),
+                    args.recipient_address,
+                )
+                .await
+                {
+                    Ok(tx_id) => {
+                        println!();
+                        println!("Concluded 'pre-mine-spend-backup-utxo'");
+                        println!("Spend utxo: {} with tx_id: {}", commitment.to_hex(), tx_id);
+                        println!();
+                    },
+                    Err(e) => {
+                        eprintln!("\nError: Spent pre-mine transaction error! {}\n", e);
+                        break;
+                    },
+                }
+            },
+            PreMineSpendPartyDetails(args) => {
+                match *key_manager_service.get_wallet_type().await {
+                    WalletType::Ledger(_) => {},
+                    _ => {
+                        eprintln!("\nError: Wallet type must be 'Ledger' to spend pre-mine outputs!\n");
+                        break;
+                    },
+                }
+
                 if args.alias.is_empty() || args.alias.contains(" ") {
                     eprintln!("\nError: Alias cannot contain spaces!\n");
-                    continue;
+                    break;
                 }
                 if args.alias.chars().any(|c| !c.is_alphanumeric() && c != '_') {
                     eprintln!("\nError: Alias contains invalid characters! Only alphanumeric and '_' are allowed.\n");
-                    continue;
+                    break;
                 }
 
                 let wallet_spend_key = wallet.key_manager_service.get_spend_key().await?;
@@ -810,9 +954,36 @@ pub async fn command_runner(
                 let sender_offset_nonce = key_manager_service.get_random_key().await?;
 
                 // Read session info
-                let session_info = read_session_info(args.input_file.clone())?;
+                let session_info = read_session_info::<PreMineSpendStep1SessionInfo>(args.input_file.clone())?;
 
-                let commitment = Commitment::from_hex(&session_info.commitment_to_spend)?;
+                if session_info.output_index != args.output_index {
+                    eprintln!(
+                        "\nError: Mismatched output index from leader '{}' vs. '{}'\n",
+                        session_info.output_index, args.output_index
+                    );
+                    break;
+                }
+                let embedded_output = get_embedded_pre_mine_outputs(vec![args.output_index])?[0].clone();
+                let commitment = embedded_output.commitment.clone();
+                let output_hash = embedded_output.hash();
+
+                if session_info.commitment_to_spend != commitment.to_hex() {
+                    eprintln!(
+                        "\nError: Mismatched commitment from leader '{}' vs. '{}'!\n",
+                        session_info.commitment_to_spend,
+                        commitment.to_hex()
+                    );
+                    break;
+                }
+                if session_info.output_hash != output_hash.to_hex() {
+                    eprintln!(
+                        "\nError: Mismatched output hash from leader '{}' vs. '{}'!\n",
+                        session_info.output_hash,
+                        output_hash.to_hex()
+                    );
+                    break;
+                }
+
                 let shared_secret = key_manager_service
                     .get_diffie_hellman_shared_secret(
                         &sender_offset_key.key_id,
@@ -824,47 +995,73 @@ pub async fn command_runner(
                     .await?;
                 let shared_secret_public_key = PublicKey::from_canonical_bytes(shared_secret.as_bytes())?;
 
+                let pre_mine_script_key_id = KeyId::Managed {
+                    branch: TransactionKeyManagerBranch::PreMine.get_branch_key(),
+                    index: args.output_index as u64,
+                };
+                let pre_mine_public_script_key = match key_manager_service
+                    .get_public_key_at_key_id(&pre_mine_script_key_id)
+                    .await
+                {
+                    Ok(key) => key,
+                    Err(e) => {
+                        eprintln!(
+                            "\nError: Could not retrieve script key for output {}: {}\n",
+                            args.output_index, e
+                        );
+                        break;
+                    },
+                };
                 let script_input_signature = key_manager_service
-                    .sign_script_message(&wallet_spend_key.key_id, commitment.as_bytes())
+                    .sign_script_message(&pre_mine_script_key_id, commitment.as_bytes())
                     .await?;
 
                 let out_dir = out_dir(&session_info.session_id)?;
-                let step_2_outputs_for_leader = Step2OutputsForLeader {
+                let step_2_outputs_for_leader = PreMineSpendStep2OutputsForLeader {
                     script_input_signature,
-                    wallet_public_spend_key: wallet_spend_key.pub_key,
                     public_script_nonce_key: script_nonce_key.pub_key,
                     public_sender_offset_key: sender_offset_key.pub_key,
                     public_sender_offset_nonce_key: sender_offset_nonce.pub_key,
                     dh_shared_secret_public_key: shared_secret_public_key,
+                    pre_mine_public_script_key,
                 };
-                let out_file_leader = out_dir.join(get_file_name(STEP_2_LEADER, Some(args.alias.clone())));
+                let out_file_leader = out_dir.join(get_file_name(SPEND_STEP_2_LEADER, Some(args.alias.clone())));
                 write_json_object_to_file_as_line(&out_file_leader, true, session_info.clone())?;
                 write_json_object_to_file_as_line(&out_file_leader, false, step_2_outputs_for_leader)?;
 
-                let step_2_outputs_for_self = Step2OutputsForSelf {
+                let step_2_outputs_for_self = PreMineSpendStep2OutputsForSelf {
                     alias: args.alias.clone(),
                     wallet_spend_key_id: wallet_spend_key.key_id,
                     script_nonce_key_id: script_nonce_key.key_id,
                     sender_offset_key_id: sender_offset_key.key_id,
                     sender_offset_nonce_key_id: sender_offset_nonce.key_id,
+                    pre_mine_script_key_id,
                 };
-                let out_file_self = out_dir.join(get_file_name(STEP_2_SELF, None));
+                let out_file_self = out_dir.join(get_file_name(SPEND_STEP_2_SELF, None));
                 write_json_object_to_file_as_line(&out_file_self, true, session_info.clone())?;
                 write_json_object_to_file_as_line(&out_file_self, false, step_2_outputs_for_self)?;
 
                 println!();
-                println!("Concluded step 2 'faucet-create-party-details'");
+                println!("Concluded step 2 'pre-mine-spend-party-details'");
                 println!("Your session's output directory is '{}'", out_dir.display());
                 move_session_file_to_session_dir(&session_info.session_id, &args.input_file)?;
                 println!(
                     "Send '{}' to leader for step 3",
-                    get_file_name(STEP_2_LEADER, Some(args.alias))
+                    get_file_name(SPEND_STEP_2_LEADER, Some(args.alias))
                 );
                 println!();
             },
-            FaucetEncumberAggregateUtxo(args) => {
+            PreMineSpendEncumberAggregateUtxo(args) => {
+                match *key_manager_service.get_wallet_type().await {
+                    WalletType::Ledger(_) => {},
+                    _ => {
+                        eprintln!("\nError: Wallet type must be 'Ledger' to spend pre-mine outputs!\n");
+                        break;
+                    },
+                }
+
                 // Read session info
-                let session_info = read_verify_session_info(&args.session_id)?;
+                let session_info = read_verify_session_info::<PreMineSpendStep1SessionInfo>(&args.session_id)?;
 
                 #[allow(clippy::mutable_key_type)]
                 let mut input_shares = HashMap::new();
@@ -874,9 +1071,12 @@ pub async fn command_runner(
                 let mut dh_shared_secret_shares = Vec::with_capacity(args.input_file_names.len());
                 for file_name in args.input_file_names {
                     // Read party input
-                    let party_info =
-                        read_and_verify::<Step2OutputsForLeader>(&args.session_id, &file_name, &session_info)?;
-                    input_shares.insert(party_info.wallet_public_spend_key, party_info.script_input_signature);
+                    let party_info = read_and_verify::<PreMineSpendStep2OutputsForLeader>(
+                        &args.session_id,
+                        &file_name,
+                        &session_info,
+                    )?;
+                    input_shares.insert(party_info.pre_mine_public_script_key, party_info.script_input_signature);
                     script_signature_public_nonces.push(party_info.public_script_nonce_key);
                     sender_offset_public_key_shares.push(party_info.public_sender_offset_key);
                     metadata_ephemeral_public_key_shares.push(party_info.public_sender_offset_nonce_key);
@@ -906,12 +1106,12 @@ pub async fn command_runner(
                         total_script_nonce,
                     )) => {
                         let out_dir = out_dir(&args.session_id)?;
-                        let step_3_outputs_for_self = Step3OutputsForSelf { tx_id };
-                        let out_file = out_dir.join(get_file_name(STEP_3_SELF, None));
+                        let step_3_outputs_for_self = PreMineSpendStep3OutputsForSelf { tx_id };
+                        let out_file = out_dir.join(get_file_name(SPEND_STEP_3_SELF, None));
                         write_json_object_to_file_as_line(&out_file, true, session_info.clone())?;
                         write_json_object_to_file_as_line(&out_file, false, step_3_outputs_for_self)?;
 
-                        let step_3_outputs_for_parties = Step3OutputsForParties {
+                        let step_3_outputs_for_parties = PreMineSpendStep3OutputsForParties {
                             input_stack: transaction.body.inputs()[0].clone().input_data,
                             input_script: transaction.body.inputs()[0].script().unwrap().clone(),
                             total_script_key: script_pubkey,
@@ -930,31 +1130,42 @@ pub async fn command_runner(
                             encrypted_data: transaction.body.outputs()[0].clone().encrypted_data,
                             output_features: transaction.body.outputs()[0].clone().features,
                         };
-                        let out_file = out_dir.join(get_file_name(STEP_3_PARTIES, None));
+                        let out_file = out_dir.join(get_file_name(SPEND_STEP_3_PARTIES, None));
                         write_json_object_to_file_as_line(&out_file, true, session_info.clone())?;
                         write_json_object_to_file_as_line(&out_file, false, step_3_outputs_for_parties)?;
 
                         println!();
-                        println!("Concluded step 3 'faucet-encumber-aggregate-utxo'");
-                        println!("Send '{}' to parties for step 4", get_file_name(STEP_3_PARTIES, None));
+                        println!("Concluded step 3 'pre-mine-spend-encumber-aggregate-utxo'");
+                        println!(
+                            "Send '{}' to parties for step 4",
+                            get_file_name(SPEND_STEP_3_PARTIES, None)
+                        );
                         println!();
                     },
                     Err(e) => eprintln!("\nError: Encumber aggregate transaction error! {}\n", e),
                 }
             },
-            FaucetCreateInputOutputSigs(args) => {
+            PreMineSpendInputOutputSigs(args) => {
+                match *key_manager_service.get_wallet_type().await {
+                    WalletType::Ledger(_) => {},
+                    _ => {
+                        eprintln!("\nError: Wallet type must be 'Ledger' to spend pre-mine outputs!\n");
+                        break;
+                    },
+                }
+
                 // Read session info
-                let session_info = read_verify_session_info(&args.session_id)?;
+                let session_info = read_verify_session_info::<PreMineSpendStep1SessionInfo>(&args.session_id)?;
                 // Read leader input
-                let leader_info = read_and_verify::<Step3OutputsForParties>(
+                let leader_info = read_and_verify::<PreMineSpendStep3OutputsForParties>(
                     &args.session_id,
-                    &get_file_name(STEP_3_PARTIES, None),
+                    &get_file_name(SPEND_STEP_3_PARTIES, None),
                     &session_info,
                 )?;
                 // Read own party info
-                let party_info = read_and_verify::<Step2OutputsForSelf>(
+                let party_info = read_and_verify::<PreMineSpendStep2OutputsForSelf>(
                     &args.session_id,
-                    &get_file_name(STEP_2_SELF, None),
+                    &get_file_name(SPEND_STEP_2_SELF, None),
                     &session_info,
                 )?;
 
@@ -969,24 +1180,24 @@ pub async fn command_runner(
                     &Commitment::from_hex(&session_info.commitment_to_spend)?,
                 );
 
-                let mut script_signature = Signature::default();
-                match key_manager_service
-                    .sign_with_nonce_and_message(
-                        &party_info.wallet_spend_key_id,
+                let script_signature = match key_manager_service
+                    .sign_with_nonce_and_challenge(
+                        &party_info.pre_mine_script_key_id,
                         &party_info.script_nonce_key_id,
                         &challenge,
                     )
                     .await
                 {
-                    Ok(signature) => {
-                        script_signature = signature;
+                    Ok(signature) => signature,
+                    Err(e) => {
+                        eprintln!("\nError: Script signature SignMessage error! {}\n", e);
+                        break;
                     },
-                    Err(e) => eprintln!("\nError: Script signature SignMessage error! {}\n", e),
-                }
+                };
 
                 // Metadata signature
                 let script_offset = key_manager_service
-                    .get_script_offset(&vec![party_info.wallet_spend_key_id], &vec![party_info
+                    .get_script_offset(&vec![party_info.pre_mine_script_key_id], &vec![party_info
                         .sender_offset_key_id
                         .clone()])
                     .await?;
@@ -1005,66 +1216,78 @@ pub async fn command_runner(
                     MicroMinotari::zero(),
                 );
 
-                let mut metadata_signature = Signature::default();
-                match key_manager_service
-                    .sign_with_nonce_and_message(
+                let metadata_signature = match key_manager_service
+                    .sign_with_nonce_and_challenge(
                         &party_info.sender_offset_key_id,
                         &party_info.sender_offset_nonce_key_id,
                         &challenge,
                     )
                     .await
                 {
-                    Ok(signature) => {
-                        metadata_signature = signature;
+                    Ok(signature) => signature,
+                    Err(e) => {
+                        eprintln!("\nError: Metadata signature SignMessage error! {}\n", e);
+                        break;
                     },
-                    Err(e) => eprintln!("\nError: Metadata signature SignMessage error! {}\n", e),
-                }
+                };
 
                 if script_signature.get_signature() == Signature::default().get_signature() ||
                     metadata_signature.get_signature() == Signature::default().get_signature()
                 {
-                    eprintln!("\nError: Script and/or metadata signatures not created!\n")
+                    eprintln!("\nError: Script and/or metadata signatures not created!\n");
+                    break;
                 } else {
-                    let step_4_outputs_for_leader = Step4OutputsForLeader {
+                    let step_4_outputs_for_leader = PreMineSpendStep4OutputsForLeader {
                         script_signature,
                         metadata_signature,
                         script_offset,
                     };
 
                     let out_dir = out_dir(&args.session_id)?;
-                    let out_file = out_dir.join(get_file_name(STEP_4_LEADER, Some(party_info.alias.clone())));
+                    let out_file = out_dir.join(get_file_name(SPEND_STEP_4_LEADER, Some(party_info.alias.clone())));
                     write_json_object_to_file_as_line(&out_file, true, session_info.clone())?;
                     write_json_object_to_file_as_line(&out_file, false, step_4_outputs_for_leader)?;
 
                     println!();
-                    println!("Concluded step 4 'faucet-create-input-output-sigs'");
+                    println!("Concluded step 4 'pre-mine-spend-input-output-sigs'");
                     println!(
                         "Send '{}' to leader for step 5",
-                        get_file_name(STEP_4_LEADER, Some(party_info.alias))
+                        get_file_name(SPEND_STEP_4_LEADER, Some(party_info.alias))
                     );
                     println!();
                 }
             },
-            FaucetSpendAggregateUtxo(args) => {
+            PreMineSpendAggregateTransaction(args) => {
+                match *key_manager_service.get_wallet_type().await {
+                    WalletType::Ledger(_) => {},
+                    _ => {
+                        eprintln!("\nError: Wallet type must be 'Ledger' to spend pre-mine outputs!\n");
+                        break;
+                    },
+                }
+
                 // Read session info
-                let session_info = read_verify_session_info(&args.session_id)?;
+                let session_info = read_verify_session_info::<PreMineSpendStep1SessionInfo>(&args.session_id)?;
 
                 let mut metadata_signatures = Vec::with_capacity(args.input_file_names.len());
                 let mut script_signatures = Vec::with_capacity(args.input_file_names.len());
                 let mut offset = PrivateKey::default();
                 for file_name in args.input_file_names {
                     // Read party input
-                    let party_info =
-                        read_and_verify::<Step4OutputsForLeader>(&args.session_id, &file_name, &session_info)?;
+                    let party_info = read_and_verify::<PreMineSpendStep4OutputsForLeader>(
+                        &args.session_id,
+                        &file_name,
+                        &session_info,
+                    )?;
                     metadata_signatures.push(party_info.metadata_signature);
                     script_signatures.push(party_info.script_signature);
                     offset = &offset + &party_info.script_offset;
                 }
 
                 // Read own party info
-                let leader_info = read_and_verify::<Step3OutputsForSelf>(
+                let leader_info = read_and_verify::<PreMineSpendStep3OutputsForSelf>(
                     &args.session_id,
-                    &get_file_name(STEP_3_SELF, None),
+                    &get_file_name(SPEND_STEP_3_SELF, None),
                     &session_info,
                 )?;
 
@@ -1079,7 +1302,7 @@ pub async fn command_runner(
                 {
                     Ok(_v) => {
                         println!();
-                        println!("Concluded step 5 'faucet-spend-aggregate-utxo'");
+                        println!("Concluded step 5 'pre-mine-spend-aggregate-transaction'");
                         println!();
                     },
                     Err(e) => println!("\nError: Error completing transaction! {}\n", e),
@@ -1457,6 +1680,142 @@ pub async fn command_runner(
                 },
                 Err(err) => eprintln!("Error generating certificates: {}", err),
             },
+            Sync(args) => {
+                let mut utxo_scanner = wallet.utxo_scanner_service.clone();
+                let mut receiver = utxo_scanner.get_event_receiver();
+
+                if !online {
+                    match wait_for_comms(&connectivity_requester).await {
+                        Ok(..) => {
+                            online = true;
+                        },
+                        Err(e) => {
+                            eprintln!("Sync error! {}", e);
+                            continue;
+                        },
+                    }
+                }
+
+                loop {
+                    match receiver.recv().await {
+                        Ok(event) => match event {
+                            UtxoScannerEvent::ConnectingToBaseNode(_) => {
+                                println!("Connecting to base node...");
+                            },
+                            UtxoScannerEvent::ConnectedToBaseNode(_, _) => {
+                                println!("Connected to base node");
+                            },
+                            UtxoScannerEvent::ConnectionFailedToBaseNode { .. } => {
+                                println!("Failed to connect to base node");
+                            },
+                            UtxoScannerEvent::ScanningRoundFailed {
+                                num_retries,
+                                retry_limit,
+                                error,
+                            } => {
+                                println!(
+                                    "Scanning round failed. Retries: {}/{}. Error: {}",
+                                    num_retries, retry_limit, error
+                                );
+                            },
+                            UtxoScannerEvent::Progress {
+                                current_height,
+                                tip_height,
+                            } => {
+                                println!("Progress: {}/{}", current_height, tip_height);
+                                if current_height >= args.sync_to_height && args.sync_to_height > 0 {
+                                    break;
+                                }
+                            },
+                            UtxoScannerEvent::Completed {
+                                final_height,
+                                num_recovered,
+                                value_recovered,
+                                time_taken,
+                            } => {
+                                println!(
+                                    "Completed! Height: {}, UTXOs recovered: {}, Value recovered: {}, Time taken: {}",
+                                    final_height,
+                                    num_recovered,
+                                    value_recovered,
+                                    time_taken.as_secs()
+                                );
+
+                                break;
+                            },
+                            UtxoScannerEvent::ScanningFailed => {
+                                println!("Scanning failed");
+                                break;
+                            },
+                        },
+                        Err(e) => {
+                            eprintln!("Sync error! {}", e);
+                            break;
+                        },
+                    }
+                }
+                println!("Starting validation process");
+                let mut oms = wallet.output_manager_service.clone();
+                oms.validate_txos().await?;
+                let mut event = oms.get_event_stream();
+                loop {
+                    match event.recv().await {
+                        Ok(event) => match *event {
+                            OutputManagerEvent::TxoValidationSuccess(_) => {
+                                println!("Validation succeeded");
+                                break;
+                            },
+                            OutputManagerEvent::TxoValidationAlreadyBusy(_) => {
+                                println!("Validation already busy");
+                            },
+                            _ => {
+                                println!("Validation failed");
+                                break;
+                            },
+                        },
+                        Err(e) => {
+                            eprintln!("Sync error! {}", e);
+                            break;
+                        },
+                    }
+                }
+                println!("balance as of scanning height");
+                match output_service.clone().get_balance().await {
+                    Ok(balance) => {
+                        println!("{}", balance);
+                    },
+                    Err(e) => eprintln!("GetBalance error! {}", e),
+                }
+            },
+            ExportViewKeyAndSpendKey(args) => {
+                let view_key = wallet.key_manager_service.get_view_key().await?;
+                let spend_key = wallet.key_manager_service.get_spend_key().await?;
+                let view_key_hex = view_key.pub_key.to_hex();
+                let private_view_key_hex = wallet.key_manager_service.get_private_view_key().await?.to_hex();
+                let spend_key_hex = spend_key.pub_key.to_hex();
+                let output_file = args.output_file;
+                #[derive(Serialize)]
+                struct ViewKeyFile {
+                    view_key: String,
+                    public_view_key: String,
+                    spend_key: String,
+                }
+                let view_key_file = ViewKeyFile {
+                    view_key: private_view_key_hex.clone(),
+                    public_view_key: view_key_hex.clone(),
+                    spend_key: spend_key_hex.clone(),
+                };
+                let view_key_file_json =
+                    serde_json::to_string(&view_key_file).map_err(|e| CommandError::JsonFile(e.to_string()))?;
+                if let Some(file) = output_file {
+                    let file = File::create(file).map_err(|e| CommandError::JsonFile(e.to_string()))?;
+                    let mut file = LineWriter::new(file);
+                    writeln!(file, "{}", view_key_file_json).map_err(|e| CommandError::JsonFile(e.to_string()))?;
+                } else {
+                    println!("View key: {}", private_view_key_hex);
+                    println!("Spend key: {}", spend_key_hex);
+                }
+            },
         }
     }
 
@@ -1496,6 +1855,61 @@ pub async fn command_runner(
     }
 
     Ok(())
+}
+
+fn get_embedded_pre_mine_outputs(output_indexes: Vec<usize>) -> Result<Vec<TransactionOutput>, CommandError> {
+    let utxos = get_all_embedded_pre_mine_outputs()?;
+
+    let mut fetched_outputs = Vec::with_capacity(output_indexes.len());
+    for index in output_indexes {
+        if index >= utxos.len() {
+            return Err(CommandError::PreMine(format!(
+                "Error: Invalid 'output_index' {} provided pre-mine outputs only number {}!",
+                index,
+                utxos.len()
+            )));
+        }
+        fetched_outputs.push(utxos[index].clone());
+    }
+    Ok(fetched_outputs)
+}
+
+fn get_all_embedded_pre_mine_outputs() -> Result<Vec<TransactionOutput>, CommandError> {
+    let pre_mine_contents = match Network::get_current_or_user_setting_or_default() {
+        Network::MainNet => {
+            include_str!("../../../../base_layer/core/src/blocks/pre_mine/mainnet_pre_mine.json")
+        },
+        Network::StageNet => {
+            include_str!("../../../../base_layer/core/src/blocks/pre_mine/stagenet_pre_mine.json")
+        },
+        Network::NextNet => {
+            include_str!("../../../../base_layer/core/src/blocks/pre_mine/nextnet_pre_mine.json")
+        },
+        Network::LocalNet => {
+            include_str!("../../../../base_layer/core/src/blocks/pre_mine/esmeralda_pre_mine.json")
+        },
+        Network::Igor => {
+            include_str!("../../../../base_layer/core/src/blocks/pre_mine/igor_pre_mine.json")
+        },
+        Network::Esmeralda => {
+            include_str!("../../../../base_layer/core/src/blocks/pre_mine/esmeralda_pre_mine.json")
+        },
+    };
+    let mut utxos = Vec::new();
+    let mut counter = 1;
+    let lines_count = pre_mine_contents.lines().count();
+    for line in pre_mine_contents.lines() {
+        if counter < lines_count {
+            let utxo: TransactionOutput =
+                serde_json::from_str(line).map_err(|e| CommandError::PreMine(format!("{}", e)))?;
+            utxos.push(utxo);
+        } else {
+            break;
+        }
+        counter += 1;
+    }
+
+    Ok(utxos)
 }
 
 fn write_utxos_to_csv_file(

@@ -20,7 +20,7 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::{convert::TryFrom, panic};
+use std::convert::TryFrom;
 
 use serde::{Deserialize, Serialize};
 use tari_common::configuration::Network;
@@ -168,18 +168,9 @@ impl DualAddress {
         if hex_str.len() < INTERNAL_DUAL_BASE58_MIN_SIZE || hex_str.len() > INTERNAL_DUAL_BASE58_MAX_SIZE {
             return Err(TariAddressError::InvalidSize);
         }
-        let result = panic::catch_unwind(|| hex_str.split_at(2));
-        let (first, rest) = match result {
-            Ok((first, rest)) => (first, rest),
-            Err(_) => return Err(TariAddressError::InvalidCharacter),
-        };
-        let result = panic::catch_unwind(|| first.split_at(1));
-        let (network, features) = match result {
-            Ok((network, features)) => (network, features),
-            Err(_) => return Err(TariAddressError::InvalidCharacter),
-        };
-        // let (first, rest) = hex_str.split_at_checked(2).ok_or(TariAddressError::InvalidCharacter)?;
-        // let (network, features) = first.split_at_checked(1).ok_or(TariAddressError::InvalidCharacter)?;
+
+        let (first, rest) = hex_str.split_at_checked(2).ok_or(TariAddressError::InvalidCharacter)?;
+        let (network, features) = first.split_at_checked(1).ok_or(TariAddressError::InvalidCharacter)?;
         let mut result = bs58::decode(network)
             .into_vec()
             .map_err(|_| TariAddressError::CannotRecoverNetwork)?;
@@ -197,12 +188,11 @@ impl DualAddress {
     /// Convert Tari Address to Base58 string
     pub fn to_base58(&self) -> String {
         let bytes = self.to_bytes();
-        let mut network = bs58::encode(&bytes[0..1]).into_string();
-        let features = bs58::encode(&bytes[1..2].to_vec()).into_string();
-        let rest = bs58::encode(&bytes[2..]).into_string();
-        network.push_str(&features);
-        network.push_str(&rest);
-        network
+        let mut base58 = "".to_string();
+        base58.push_str(&bs58::encode(&bytes[0..1]).into_string());
+        base58.push_str(&bs58::encode(&bytes[1..2].to_vec()).into_string());
+        base58.push_str(&bs58::encode(&bytes[2..]).into_string());
+        base58
     }
 
     /// Convert Tari dual Address to hex

@@ -197,7 +197,7 @@ checksum = "16e62a023e7c117e27523144c5d2459f4397fcc3cab0085af8e2224f643a0193"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -208,7 +208,7 @@ checksum = "a66537f1bb974b254c98ed142ff995236e81b9d0fe4db0575f46612cb15eb0f9"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -496,7 +496,7 @@ dependencies = [
  "proc-macro-crate 2.0.0",
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
  "syn_derive",
 ]
 
@@ -851,7 +851,7 @@ dependencies = [
  "heck 0.4.1",
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -1286,7 +1286,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13b588ba4ac1a99f7f2964d24b3d896ddc6bf847ee3855dbd4366f058cfcd331"
 dependencies = [
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -1364,7 +1364,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "syn 2.0.38",
+ "syn 2.0.74",
  "synthez",
 ]
 
@@ -1409,7 +1409,7 @@ checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -1583,6 +1583,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "dialoguer"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "658bce805d770f407bc62102fca7c2c64ceef2fbcb2b8bd19d2765ce093980de"
+dependencies = [
+ "console",
+ "shell-words",
+ "tempfile",
+ "thiserror",
+ "zeroize",
+]
+
+[[package]]
 name = "diesel"
 version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1609,7 +1622,7 @@ dependencies = [
  "diesel_table_macro_syntax",
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -1629,7 +1642,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc5557efc453706fed5e4fa85006fe9817c224c3f480a34c7e5959fd700921c5"
 dependencies = [
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -1654,15 +1667,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dirs"
-version = "5.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44c45a9d03d6676652bcb5e724c7e988de1acad23a711b5217ab9cbecbec2225"
-dependencies = [
- "dirs-sys",
-]
-
-[[package]]
 name = "dirs-next"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1680,18 +1684,6 @@ checksum = "b98cf8ebf19c3d1b223e151f99a4f9f0690dca41414773390fc824184ac833e1"
 dependencies = [
  "cfg-if",
  "dirs-sys-next",
-]
-
-[[package]]
-name = "dirs-sys"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "520f05a5cbd335fae5a99ff7a6ab8627577660ee5cfd6a94a6a929b52ff0321c"
-dependencies = [
- "libc",
- "option-ext",
- "redox_users",
- "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -2107,7 +2099,7 @@ checksum = "53b153fd91e4b0147f4aced87be237c98248656bb01050b96bf3ee89220a8ddb"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -2219,7 +2211,7 @@ dependencies = [
  "quote",
  "serde",
  "serde_json",
- "syn 2.0.38",
+ "syn 2.0.74",
  "textwrap 0.16.0",
  "thiserror",
  "typed-builder",
@@ -2844,7 +2836,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "regex",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -3215,7 +3207,7 @@ dependencies = [
 
 [[package]]
 name = "minotari_app_grpc"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "argon2",
  "base64 0.13.1",
@@ -3243,10 +3235,10 @@ dependencies = [
 
 [[package]]
 name = "minotari_app_utilities"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "clap 3.2.25",
- "dialoguer",
+ "dialoguer 0.10.4",
  "futures 0.3.29",
  "json5",
  "log",
@@ -3265,7 +3257,7 @@ dependencies = [
 
 [[package]]
 name = "minotari_chat_ffi"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "cbindgen",
  "chrono",
@@ -3290,7 +3282,7 @@ dependencies = [
 
 [[package]]
 name = "minotari_console_wallet"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "blake2",
  "chrono",
@@ -3299,9 +3291,8 @@ dependencies = [
  "console-subscriber",
  "crossterm 0.25.0",
  "digest 0.10.7",
- "dirs",
+ "dirs-next 2.0.0",
  "futures 0.3.29",
- "ledger-transport-hid",
  "log",
  "log4rs",
  "minotari_app_grpc",
@@ -3345,22 +3336,37 @@ dependencies = [
 ]
 
 [[package]]
-name = "minotari_ledger_wallet_comms"
-version = "1.0.0-pre.17"
+name = "minotari_ledger_wallet_common"
+version = "1.1.0-pre.2"
 dependencies = [
+ "bs58 0.5.1",
+ "tari_utilities",
+]
+
+[[package]]
+name = "minotari_ledger_wallet_comms"
+version = "1.1.0-pre.2"
+dependencies = [
+ "borsh",
+ "dialoguer 0.11.0",
  "ledger-transport 0.10.0 (git+https://github.com/Zondax/ledger-rs?rev=20e2a20)",
  "ledger-transport-hid",
- "num-derive",
- "num-traits",
+ "log",
+ "minotari_ledger_wallet_common",
+ "once_cell",
+ "rand",
  "serde",
+ "tari_common",
  "tari_common_types",
  "tari_crypto",
+ "tari_script",
+ "tari_utilities",
  "thiserror",
 ]
 
 [[package]]
 name = "minotari_merge_mining_proxy"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3401,7 +3407,7 @@ dependencies = [
 
 [[package]]
 name = "minotari_miner"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "base64 0.13.1",
  "borsh",
@@ -3437,7 +3443,7 @@ dependencies = [
 
 [[package]]
 name = "minotari_mining_helper_ffi"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "borsh",
  "cbindgen",
@@ -3457,7 +3463,7 @@ dependencies = [
 
 [[package]]
 name = "minotari_node"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3513,7 +3519,7 @@ dependencies = [
 
 [[package]]
 name = "minotari_wallet"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "argon2",
  "async-trait",
@@ -3563,7 +3569,7 @@ dependencies = [
 
 [[package]]
 name = "minotari_wallet_ffi"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "borsh",
  "cbindgen",
@@ -3850,7 +3856,7 @@ checksum = "ed3955f1a9c7c0c15e092f9c887db08b1fc683305fdf6eb6684f22555355e202"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -3969,7 +3975,7 @@ checksum = "a948666b637a0f465e8564c73e89d4dde00d72d4d473cc972f390fc3dcee7d9c"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -3999,12 +4005,6 @@ dependencies = [
  "pkg-config",
  "vcpkg",
 ]
-
-[[package]]
-name = "option-ext"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "ordered-float"
@@ -4235,7 +4235,7 @@ dependencies = [
  "pest_meta",
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -4380,7 +4380,7 @@ dependencies = [
  "phf_shared 0.11.2",
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -4438,7 +4438,7 @@ checksum = "4359fd9c9171ec6e8c62926d6faaf553a8dc3f64e1507e76da7911b4f6a04405"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -4631,9 +4631,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.69"
+version = "1.0.86"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "134c189feb4956b20f6f547d2cf727d4c0fe06722b20a0eec87ed445a97f92da"
+checksum = "5e719e8df665df0d1c8fbfd238015744736151d4445ec0836b8e628aae103b77"
 dependencies = [
  "unicode-ident",
 ]
@@ -4757,9 +4757,9 @@ dependencies = [
 
 [[package]]
 name = "quote"
-version = "1.0.33"
+version = "1.0.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5267fca4496028628a95160fc423a33e8b2e6af8a5302579e322e4b520293cae"
+checksum = "0fa76aaf39101c457836aec0ce2316dbdc3ab723cdda1c6bd4e6ad4208acaca7"
 dependencies = [
  "proc-macro2",
 ]
@@ -5284,7 +5284,7 @@ dependencies = [
  "heck 0.4.1",
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -5351,9 +5351,9 @@ checksum = "836fa6a3e1e547f9a2c4040802ec865b5d85f4014efe00555d7090a3dcaa1090"
 
 [[package]]
 name = "serde"
-version = "1.0.190"
+version = "1.0.206"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91d3c334ca1ee894a2c6f6ad698fe8c435b76d504b13d436f0685d648d6d96f7"
+checksum = "5b3e4cd94123dd520a128bcd11e34d9e9e423e7e3e50425cb1b4b1e3549d0284"
 dependencies = [
  "serde_derive",
 ]
@@ -5370,13 +5370,13 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.190"
+version = "1.0.206"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67c5609f394e5c2bd7fc51efda478004ea80ef42fee983d5c67a65e34f32c0e3"
+checksum = "fabfb6138d2383ea8208cf98ccf69cdfb1aff4088460681d84189aa259762f97"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -5398,7 +5398,7 @@ checksum = "3081f5ffbb02284dda55132aa26daecedd7372a42417bbbab6f14ab7d6bb9145"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -5580,7 +5580,7 @@ checksum = "0eb01866308440fc64d6c44d9e86c5cc17adfe33c4d6eed55da9145044d0ffc1"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -5804,9 +5804,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.38"
+version = "2.0.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e96b79aaa137db8f61e26363a0c9b47d8b4ec75da28b7d1d614c2303e232408b"
+checksum = "1fceb41e3d546d0bd83421d3409b1460cc7444cd389341a4c880fe7a042cb3d7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5822,7 +5822,7 @@ dependencies = [
  "proc-macro-error",
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -5849,7 +5849,7 @@ version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3d2c2202510a1e186e63e596d9318c91a8cbe85cd1a56a7be0c333e5f59ec8d"
 dependencies = [
- "syn 2.0.38",
+ "syn 2.0.74",
  "synthez-codegen",
  "synthez-core",
 ]
@@ -5860,7 +5860,7 @@ version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f724aa6d44b7162f3158a57bccd871a77b39a4aef737e01bcdff41f4772c7746"
 dependencies = [
- "syn 2.0.38",
+ "syn 2.0.74",
  "synthez-core",
 ]
 
@@ -5873,7 +5873,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "sealed",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -5936,7 +5936,7 @@ dependencies = [
 
 [[package]]
 name = "tari_chat_client"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5962,10 +5962,9 @@ dependencies = [
 
 [[package]]
 name = "tari_common"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "anyhow",
- "blake2",
  "config",
  "dirs-next 1.0.2",
  "git2",
@@ -5979,7 +5978,6 @@ dependencies = [
  "serde_yaml",
  "sha2 0.10.8",
  "structopt",
- "tari_crypto",
  "tari_features",
  "tari_test_utils",
  "tempfile",
@@ -5989,7 +5987,7 @@ dependencies = [
 
 [[package]]
 name = "tari_common_sqlite"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "diesel",
  "diesel_migrations",
@@ -6003,7 +6001,7 @@ dependencies = [
 
 [[package]]
 name = "tari_common_types"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "base64 0.21.5",
  "bitflags 2.4.1",
@@ -6012,6 +6010,7 @@ dependencies = [
  "bs58 0.5.1",
  "chacha20poly1305",
  "digest 0.10.7",
+ "minotari_ledger_wallet_common",
  "newtype-ops",
  "once_cell",
  "primitive-types",
@@ -6027,7 +6026,7 @@ dependencies = [
 
 [[package]]
 name = "tari_comms"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6076,7 +6075,7 @@ dependencies = [
 
 [[package]]
 name = "tari_comms_dht"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "anyhow",
  "bitflags 2.4.1",
@@ -6120,7 +6119,7 @@ dependencies = [
 
 [[package]]
 name = "tari_comms_rpc_macros"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "futures 0.3.29",
  "proc-macro2",
@@ -6135,7 +6134,7 @@ dependencies = [
 
 [[package]]
 name = "tari_contacts"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "chrono",
  "diesel",
@@ -6168,7 +6167,7 @@ dependencies = [
 
 [[package]]
 name = "tari_core"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "async-trait",
  "bincode",
@@ -6183,6 +6182,7 @@ dependencies = [
  "decimal-rs",
  "derivative",
  "digest 0.10.7",
+ "dirs-next 1.0.2",
  "env_logger 0.7.1",
  "fs2",
  "futures 0.3.29",
@@ -6265,11 +6265,11 @@ dependencies = [
 
 [[package]]
 name = "tari_features"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 
 [[package]]
 name = "tari_hashing"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "blake2",
  "borsh",
@@ -6327,7 +6327,7 @@ dependencies = [
 
 [[package]]
 name = "tari_key_manager"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "argon2",
  "async-trait",
@@ -6362,7 +6362,7 @@ dependencies = [
 
 [[package]]
 name = "tari_libtor"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "derivative",
  "libtor",
@@ -6376,7 +6376,7 @@ dependencies = [
 
 [[package]]
 name = "tari_metrics"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "anyhow",
  "futures 0.3.29",
@@ -6391,7 +6391,7 @@ dependencies = [
 
 [[package]]
 name = "tari_mmr"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "bincode",
  "blake2",
@@ -6402,7 +6402,6 @@ dependencies = [
  "rand",
  "serde",
  "serde_json",
- "tari_common",
  "tari_crypto",
  "tari_utilities",
  "thiserror",
@@ -6410,7 +6409,7 @@ dependencies = [
 
 [[package]]
 name = "tari_p2p"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "anyhow",
  "clap 3.2.25",
@@ -6446,7 +6445,7 @@ dependencies = [
 
 [[package]]
 name = "tari_script"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "blake2",
  "borsh",
@@ -6463,7 +6462,7 @@ dependencies = [
 
 [[package]]
 name = "tari_service_framework"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6480,7 +6479,7 @@ dependencies = [
 
 [[package]]
 name = "tari_shutdown"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "futures 0.3.29",
  "tokio",
@@ -6488,7 +6487,7 @@ dependencies = [
 
 [[package]]
 name = "tari_storage"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "bincode",
  "lmdb-zero",
@@ -6501,7 +6500,7 @@ dependencies = [
 
 [[package]]
 name = "tari_test_utils"
-version = "1.0.0-pre.17"
+version = "1.1.0-pre.2"
 dependencies = [
  "futures 0.3.29",
  "futures-test",
@@ -6611,7 +6610,7 @@ checksum = "266b2e40bc00e5a6c09c3584011e08b06f123c00362c92b975ba9843aaaa14b8"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -6756,7 +6755,7 @@ checksum = "5b8a1e28f2deaa14e508979454cb3a223b10b938b45af148bc0986de36f1923b"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -7010,7 +7009,7 @@ checksum = "34704c8d6ebcbc939824180af020566b01a7c01f80641264eba0999f6c2b6be7"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -7132,7 +7131,7 @@ checksum = "29a3151c41d0b13e3d011f98adc24434560ef06673a155a6c7f66b9879eecce2"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -7410,7 +7409,7 @@ dependencies = [
  "once_cell",
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
  "wasm-bindgen-shared",
 ]
 
@@ -7444,7 +7443,7 @@ checksum = "c5353b8dab669f5e10f5bd76df26a9360c748f054f862ff5f3f8aae0c7fb3907"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
  "wasm-bindgen-backend",
  "wasm-bindgen-shared",
 ]
@@ -7816,7 +7815,7 @@ checksum = "9ce1b18ccd8e73a9321186f97e46f9f04b778851177567b1975109d26a08d2a6"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]
@@ -7836,7 +7835,7 @@ checksum = "ce36e65b0d2999d2aafac989fb249189a141aee1f53c612c1f37d72631959f69"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.38",
+ "syn 2.0.74",
 ]
 
 [[package]]

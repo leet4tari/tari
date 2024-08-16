@@ -88,6 +88,11 @@ pub struct Cli {
     pub command2: Option<CliCommands>,
     #[clap(long, alias = "profile")]
     pub profile_with_tokio_console: bool,
+    // For read only wallets
+    #[clap(long)]
+    pub view_private_key: Option<String>,
+    #[clap(long)]
+    pub spend_key: Option<String>,
 }
 
 impl ConfigOverrideProvider for Cli {
@@ -116,11 +121,13 @@ pub enum CliCommands {
     GetBalance,
     SendMinotari(SendMinotariArgs),
     BurnMinotari(BurnMinotariArgs),
-    FaucetGenerateSessionInfo(FaucetGenerateSessionInfoArgs),
-    FaucetCreatePartyDetails(FaucetCreatePartyDetailsArgs),
-    FaucetEncumberAggregateUtxo(FaucetEncumberAggregateUtxoArgs),
-    FaucetCreateInputOutputSigs(FaucetCreateInputOutputSigArgs),
-    FaucetSpendAggregateUtxo(FaucetSpendAggregateUtxoArgs),
+    PreMineSpendGetOutputStatus,
+    PreMineSpendSessionInfo(PreMineSpendSessionInfoArgs),
+    PreMineSpendPartyDetails(PreMineSpendPartyDetailsArgs),
+    PreMineSpendEncumberAggregateUtxo(PreMineSpendEncumberAggregateUtxoArgs),
+    PreMineSpendInputOutputSigs(PreMineSpendInputOutputSigArgs),
+    PreMineSpendAggregateTransaction(PreMineSpendAggregateTransactionArgs),
+    PreMineSpendBackupUtxo(PreMineSpendBackupUtxoArgs),
     SendOneSidedToStealthAddress(SendMinotariArgs),
     MakeItRain(MakeItRainArgs),
     CoinSplit(CoinSplitArgs),
@@ -140,6 +147,8 @@ pub enum CliCommands {
     RevalidateWalletDb,
     RegisterValidatorNode(RegisterValidatorNodeArgs),
     CreateTlsCerts,
+    Sync(SyncArgs),
+    ExportViewKeyAndSpendKey(ExportViewKeyAndSpendKeyArgs),
 }
 
 #[derive(Debug, Args, Clone)]
@@ -163,13 +172,11 @@ pub struct BurnMinotariArgs {
 }
 
 #[derive(Debug, Args, Clone)]
-pub struct FaucetGenerateSessionInfoArgs {
+pub struct PreMineSpendSessionInfoArgs {
     #[clap(long)]
     pub fee_per_gram: MicroMinotari,
     #[clap(long)]
-    pub commitment: String,
-    #[clap(long)]
-    pub output_hash: String,
+    pub output_index: usize,
     #[clap(long)]
     pub recipient_address: TariAddress,
     #[clap(long)]
@@ -177,15 +184,17 @@ pub struct FaucetGenerateSessionInfoArgs {
 }
 
 #[derive(Debug, Args, Clone)]
-pub struct FaucetCreatePartyDetailsArgs {
+pub struct PreMineSpendPartyDetailsArgs {
     #[clap(long)]
     pub input_file: PathBuf,
+    #[clap(long)]
+    pub output_index: usize,
     #[clap(long)]
     pub alias: String,
 }
 
 #[derive(Debug, Args, Clone)]
-pub struct FaucetEncumberAggregateUtxoArgs {
+pub struct PreMineSpendEncumberAggregateUtxoArgs {
     #[clap(long)]
     pub session_id: String,
     #[clap(long)]
@@ -193,17 +202,27 @@ pub struct FaucetEncumberAggregateUtxoArgs {
 }
 
 #[derive(Debug, Args, Clone)]
-pub struct FaucetCreateInputOutputSigArgs {
+pub struct PreMineSpendInputOutputSigArgs {
     #[clap(long)]
     pub session_id: String,
 }
 
 #[derive(Debug, Args, Clone)]
-pub struct FaucetSpendAggregateUtxoArgs {
+pub struct PreMineSpendAggregateTransactionArgs {
     #[clap(long)]
     pub session_id: String,
     #[clap(long)]
     pub input_file_names: Vec<String>,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct PreMineSpendBackupUtxoArgs {
+    #[clap(long)]
+    pub fee_per_gram: MicroMinotari,
+    #[clap(long)]
+    pub output_index: usize,
+    #[clap(long)]
+    pub recipient_address: TariAddress,
 }
 
 #[derive(Debug, Args, Clone)]
@@ -295,6 +314,12 @@ pub struct ExportTxArgs {
 }
 
 #[derive(Debug, Args, Clone)]
+pub struct ExportViewKeyAndSpendKeyArgs {
+    #[clap(short, long)]
+    pub output_file: Option<PathBuf>,
+}
+
+#[derive(Debug, Args, Clone)]
 pub struct ImportTxArgs {
     #[clap(short, long)]
     pub input_file: PathBuf,
@@ -348,4 +373,10 @@ pub struct RegisterValidatorNodeArgs {
     pub validator_node_signature: Vec<u8>,
     #[clap(short, long, default_value = "Registering VN")]
     pub message: String,
+}
+
+#[derive(Debug, Args, Clone)]
+pub struct SyncArgs {
+    #[clap(short, long, default_value = "0")]
+    pub sync_to_height: u64,
 }

@@ -340,7 +340,7 @@ impl From<DbWalletOutput> for TariUtxo {
                 .expect("failed to obtain hex from a commitment")
                 .into_raw(),
             payment_id: CString::new(
-                String::from_utf8(x.payment_id.as_bytes()).unwrap_or_else(|_| "Invalid".to_string()),
+                String::from_utf8(x.payment_id.to_bytes()).unwrap_or_else(|_| "Invalid".to_string()),
             )
             .expect("failed to obtain string from a payment id")
             .into_raw(),
@@ -5693,6 +5693,7 @@ pub unsafe extern "C" fn wallet_create(
     callback_transaction_validation_complete: unsafe extern "C" fn(u64, u64),
     callback_saf_messages_received: unsafe extern "C" fn(),
     callback_connectivity_status: unsafe extern "C" fn(u64),
+    callback_wallet_scanned_height: unsafe extern "C" fn(u64),
     callback_base_node_state: unsafe extern "C" fn(*mut TariBaseNodeState),
     recovery_in_progress: *mut bool,
     error_out: *mut c_int,
@@ -5954,6 +5955,8 @@ pub unsafe extern "C" fn wallet_create(
                 },
             };
 
+            let mut utxo_scanner = w.utxo_scanner_service.clone();
+
             // Start Callback Handler
             let callback_handler = CallbackHandler::new(
                 TransactionDatabase::new(transaction_backend),
@@ -5961,6 +5964,7 @@ pub unsafe extern "C" fn wallet_create(
                 w.transaction_service.get_event_stream(),
                 w.output_manager_service.get_event_stream(),
                 w.output_manager_service.clone(),
+                utxo_scanner.get_event_receiver(),
                 w.dht_service.subscribe_dht_events(),
                 w.comms.shutdown_signal(),
                 wallet_address,
@@ -5982,6 +5986,7 @@ pub unsafe extern "C" fn wallet_create(
                 callback_transaction_validation_complete,
                 callback_saf_messages_received,
                 callback_connectivity_status,
+                callback_wallet_scanned_height,
                 callback_base_node_state,
             );
 
@@ -9220,7 +9225,7 @@ mod test {
     use once_cell::sync::Lazy;
     use tari_common_types::{emoji, tari_address::TariAddressFeatures, types::PrivateKey};
     use tari_comms::peer_manager::PeerFeatures;
-    use tari_contacts::contacts_service::types::{Direction, Message, MessageMetadata};
+    use tari_contacts::contacts_service::types::{ChatBody, Direction, Message, MessageId, MessageMetadata};
     use tari_core::{
         covenant,
         transactions::{
@@ -9464,6 +9469,10 @@ mod test {
     }
 
     unsafe extern "C" fn connectivity_status_callback(_status: u64) {
+        // assert!(true); //optimized out by compiler
+    }
+
+    unsafe extern "C" fn wallet_scanned_height_callback(_height: u64) {
         // assert!(true); //optimized out by compiler
     }
 
@@ -10153,6 +10162,7 @@ mod test {
                 transaction_validation_complete_callback,
                 saf_messages_received_callback,
                 connectivity_status_callback,
+                wallet_scanned_height_callback,
                 base_node_state_callback,
                 recovery_in_progress_ptr,
                 error_ptr,
@@ -10199,6 +10209,7 @@ mod test {
                 transaction_validation_complete_callback,
                 saf_messages_received_callback,
                 connectivity_status_callback,
+                wallet_scanned_height_callback,
                 base_node_state_callback,
                 recovery_in_progress_ptr,
                 error_ptr,
@@ -10314,6 +10325,7 @@ mod test {
                 transaction_validation_complete_callback,
                 saf_messages_received_callback,
                 connectivity_status_callback,
+                wallet_scanned_height_callback,
                 base_node_state_callback,
                 recovery_in_progress_ptr,
                 error_ptr,
@@ -10540,6 +10552,7 @@ mod test {
                 transaction_validation_complete_callback,
                 saf_messages_received_callback,
                 connectivity_status_callback,
+                wallet_scanned_height_callback,
                 base_node_state_callback,
                 recovery_in_progress_ptr,
                 error_ptr,
@@ -10606,6 +10619,7 @@ mod test {
                 transaction_validation_complete_callback,
                 saf_messages_received_callback,
                 connectivity_status_callback,
+                wallet_scanned_height_callback,
                 base_node_state_callback,
                 recovery_in_progress_ptr,
                 error_ptr,
@@ -10684,6 +10698,7 @@ mod test {
                 transaction_validation_complete_callback,
                 saf_messages_received_callback,
                 connectivity_status_callback,
+                wallet_scanned_height_callback,
                 base_node_state_callback,
                 recovery_in_progress_ptr,
                 error_ptr,
@@ -10860,6 +10875,7 @@ mod test {
                 transaction_validation_complete_callback,
                 saf_messages_received_callback,
                 connectivity_status_callback,
+                wallet_scanned_height_callback,
                 base_node_state_callback,
                 recovery_in_progress_ptr,
                 error_ptr,
@@ -10997,6 +11013,7 @@ mod test {
                 transaction_validation_complete_callback,
                 saf_messages_received_callback,
                 connectivity_status_callback,
+                wallet_scanned_height_callback,
                 base_node_state_callback,
                 recovery_in_progress_ptr,
                 error_ptr,
@@ -11214,6 +11231,7 @@ mod test {
                 transaction_validation_complete_callback,
                 saf_messages_received_callback,
                 connectivity_status_callback,
+                wallet_scanned_height_callback,
                 base_node_state_callback,
                 recovery_in_progress_ptr,
                 error_ptr,
@@ -11439,6 +11457,7 @@ mod test {
                 transaction_validation_complete_callback,
                 saf_messages_received_callback,
                 connectivity_status_callback,
+                wallet_scanned_height_callback,
                 base_node_state_callback,
                 recovery_in_progress_ptr,
                 error_ptr,
@@ -11698,6 +11717,7 @@ mod test {
                 transaction_validation_complete_callback,
                 saf_messages_received_callback,
                 connectivity_status_callback,
+                wallet_scanned_height_callback,
                 base_node_state_callback,
                 recovery_in_progress_ptr,
                 error_ptr,
@@ -12075,6 +12095,7 @@ mod test {
                 transaction_validation_complete_callback,
                 saf_messages_received_callback,
                 connectivity_status_callback,
+                wallet_scanned_height_callback,
                 base_node_state_callback,
                 recovery_in_progress_ptr,
                 error_ptr,
@@ -12138,6 +12159,7 @@ mod test {
                 transaction_validation_complete_callback,
                 saf_messages_received_callback,
                 connectivity_status_callback,
+                wallet_scanned_height_callback,
                 base_node_state_callback,
                 recovery_in_progress_ptr,
                 error_ptr,
@@ -12254,7 +12276,7 @@ mod test {
                 if alice_msg_count < 5 {
                     let alice_message_result =
                         alice_wallet_runtime.block_on(alice_wallet_contacts_service.send_message(Message {
-                            body: vec![i],
+                            body: ChatBody::try_from(vec![i]).unwrap(),
                             metadata: vec![MessageMetadata::default()],
                             receiver_address: alice_wallet_address.clone(),
                             sender_address: bob_wallet_address.clone(),
@@ -12263,7 +12285,7 @@ mod test {
                             sent_at: u64::from(i),
                             delivery_confirmation_at: None,
                             read_confirmation_at: None,
-                            message_id: vec![i],
+                            message_id: MessageId::try_from(vec![i]).unwrap(),
                         }));
                     if alice_message_result.is_ok() {
                         alice_msg_count += 1;
@@ -12272,7 +12294,7 @@ mod test {
                 if bob_msg_count < 5 {
                     let bob_message_result =
                         bob_wallet_runtime.block_on(bob_wallet_contacts_service.send_message(Message {
-                            body: vec![i],
+                            body: ChatBody::try_from(vec![i]).unwrap(),
                             metadata: vec![MessageMetadata::default()],
                             sender_address: alice_wallet_address.clone(),
                             receiver_address: bob_wallet_address.clone(),
@@ -12281,7 +12303,7 @@ mod test {
                             sent_at: u64::from(i),
                             delivery_confirmation_at: None,
                             read_confirmation_at: None,
-                            message_id: vec![i],
+                            message_id: MessageId::try_from(vec![i]).unwrap(),
                         }));
                     if bob_message_result.is_ok() {
                         bob_msg_count += 1;
