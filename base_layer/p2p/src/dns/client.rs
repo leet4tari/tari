@@ -27,7 +27,8 @@ use rustls::{ClientConfig, RootCertStore};
 use tari_common::DnsNameServer;
 use tari_shutdown::Shutdown;
 use tokio::task;
-use trust_dns_client::{
+//use trust_dns_client::{
+use hickory_client::{
     client::{AsyncClient, AsyncDnssecClient, ClientHandle},
     op::Query,
     proto::{
