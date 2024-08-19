@@ -160,6 +160,7 @@ pub struct PowAlgorithmConstants {
 const PRE_MINE_VALUE: u64 = 0; // 6_030_157_777_181_012;
 const INITIAL_EMISSION: MicroMinotari = MicroMinotari(13_952_877_857);
 const ESMERALDA_INITIAL_EMISSION: MicroMinotari = INITIAL_EMISSION;
+const MAINNET_PRE_MINE_VALUE: MicroMinotari = MicroMinotari((21_000_000_000 - 14_700_000_000) * 1_000_000);
 
 // The target time used by the difficulty adjustment algorithms, their target time is the target block interval * PoW
 // algorithm count
@@ -522,7 +523,7 @@ impl ConsensusConstants {
             max_randomx_seed_height: 3000,
             max_extra_field_size: 200,
             proof_of_work: algos,
-            pre_mine_value: ((21_000_000_000 - 14_700_000_000) * 1_000_000).into(),
+            pre_mine_value: MAINNET_PRE_MINE_VALUE,
             transaction_weight: TransactionWeight::v1(),
             max_script_byte_size: 512,
             max_extra_encrypted_data_byte_size: 256,
@@ -683,7 +684,7 @@ impl ConsensusConstants {
             max_randomx_seed_height: 3000,
             max_extra_field_size: 200,
             proof_of_work: algos,
-            pre_mine_value: MicroMinotari::from(0),
+            pre_mine_value: MAINNET_PRE_MINE_VALUE,
             transaction_weight: TransactionWeight::v1(),
             max_script_byte_size: 512,
             max_extra_encrypted_data_byte_size: 256,
