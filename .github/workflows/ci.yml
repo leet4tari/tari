@@ -122,7 +122,8 @@ jobs:
     # Runs cargo check with stable toolchain to determine whether the codebase is likely to build
     #  on stable Rust.
     name: cargo check with stable
-    runs-on: [self-hosted, ubuntu-high-cpu]
+    #runs-on: [self-hosted, ubuntu-high-cpu]
+    runs-on: [ubuntu-latest]
     env:
       RUSTUP_PERMIT_COPY_RENAME: true
     steps:
@@ -183,7 +184,8 @@ jobs:
 
   licenses:
     name: file licenses
-    runs-on: [ubuntu-20.04]
+    #runs-on: [ubuntu-20.04]
+    runs-on: [ubuntu-latest]
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -198,7 +200,8 @@ jobs:
 
   test:
     name: test
-    runs-on: [self-hosted, ubuntu-high-cpu]
+    #runs-on: [self-hosted, ubuntu-high-cpu]
+    runs-on: [ubuntu-latest]
     permissions:
       checks: write
       pull-requests: write
