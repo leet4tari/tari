@@ -1,0 +1,18 @@
+---
+# Testing if a quick running dummy workflow would get rouge event workflows
+name: CI - Dummy
+
+'on':
+  pull_request_target
+
+permissions: {}
+
+jobs:
+  dummy:
+    name: dummy workflow
+    runs-on: ubuntu-latest
+    steps:
+      - name: dummy shell
+        shell: bash
+        run: |
+          echo "Running a dummy workflow - $(date)"
