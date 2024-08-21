@@ -204,6 +204,7 @@ jobs:
 
   # needed for test results
   event_file:
+    #needs: [base_layer,ffi]
     name: "Upload Event File for Test Results"
     runs-on: [ubuntu-latest]
     steps:
