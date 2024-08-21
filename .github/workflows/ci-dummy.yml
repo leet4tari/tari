@@ -3,7 +3,17 @@
 name: CI - Dummy
 
 'on':
-  pull_request_target
+  pull_request_target:
+  push:
+    branches:
+      - "ci-*"
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+  merge_group:
+  workflow_dispatch:
 
 permissions: {}
 
@@ -15,4 +25,4 @@ jobs:
       - name: dummy shell
         shell: bash
         run: |
-          echo "Running a dummy workflow - $(date)"
+          echo "Running a dummy workflow - $(date)."
