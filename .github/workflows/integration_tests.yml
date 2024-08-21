@@ -2,6 +2,11 @@
 name: Integration tests
 
 'on':
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]*"
+    branches:
+      - "ci-*"
   pull_request:
     types:
       - opened
@@ -76,7 +81,12 @@ jobs:
           sudo apt-get update
           sudo bash scripts/install_ubuntu_dependencies.sh
 
+      - name: Cache cargo files and outputs
+        if: startsWith(runner.environment,'github-hosted')
+        uses: Swatinem/rust-cache@v2
+
       - name: caching (nightly)
+        if: startsWith(runner.environment,'self-hosted')
         # Don't use rust-cache.
         # Rust-cache disables a key feature of actions/cache: restoreKeys.
         # Without restore keys, we lose the ability to get partial matches on caches, and end
@@ -116,7 +126,7 @@ jobs:
         uses: actions/upload-artifact@v4  # upload test results as artifact
         if: always()
         with:
-          name: junit-cucumber
+          name: test-results-junit-baselayer-cucumber
           path: ${{ github.workspace }}/integration_tests/cucumber-output-junit.xml
 
   ffi:
@@ -161,7 +171,11 @@ jobs:
           sudo bash scripts/install_ubuntu_dependencies.sh
 
       - name: Cache cargo files and outputs
-        if: ${{ env.CI_FFI == 'true' }}
+        if: startsWith(runner.environment,'github-hosted')
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cache cargo files and outputs
+        if: ${{ ( startsWith(runner.environment,'self-hosted') ) && ( env.CI_FFI == 'true' ) }}
         # Don't use rust-cache.
         # This job runs on self-hosted, so use local-cache instead.
         uses: maxnowack/local-cache@v2
@@ -199,7 +213,7 @@ jobs:
         uses: actions/upload-artifact@v4  # upload test results as artifact
         if: always()
         with:
-          name: junit-ffi-cucumber
+          name: test-results-junit-ffi-cucumber
           path: ${{ github.workspace }}/integration_tests/cucumber-output-junit.xml
 
   # needed for test results

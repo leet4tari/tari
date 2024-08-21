@@ -64,8 +64,8 @@ jobs:
         uses: dorny/test-reporter@v1
         with:
           #working-directory: artifacts
-          #artifact: /test-results-(.*)/
-          #name: 'JEST Tests $1'
-          name: JEST Tests
+          artifact: /test-results-(.*)/
+          name: 'JEST Tests $1'
+          #name: JEST Tests
           path: 'artifacts/**/*.xml'
           reporter: jest-junit
