@@ -1,7 +1,7 @@
 ---
 name: Integration tests
 
-"on":
+'on':
   pull_request:
     types:
       - opened
@@ -30,13 +30,17 @@ env:
   toolchain: nightly-2024-07-07
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  # cancel-in-progress: true
+  # https://docs.github.com/en/actions/examples/using-concurrency-expressions-and-a-test-matrix
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') || github.ref != 'refs/heads/development' || github.ref != 'refs/heads/nextnet' || github.ref != 'refs/heads/stagenet' }}
+
+permissions: {}
 
 jobs:
   base_layer:
     name: Cucumber tests / Base Layer
-    runs-on: [self-hosted, ubuntu-high-cpu]
+    #runs-on: [self-hosted, ubuntu-high-cpu]
+    runs-on: [ubuntu-latest]
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -117,7 +121,8 @@ jobs:
 
   ffi:
     name: Cucumber tests / FFI
-    runs-on: [self-hosted, ubuntu-high-cpu]
+    #runs-on: [self-hosted, ubuntu-high-cpu]
+    runs-on: [ubuntu-latest]
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -200,7 +205,7 @@ jobs:
   # needed for test results
   event_file:
     name: "Upload Event File for Test Results"
-    runs-on: ubuntu-latest
+    runs-on: [ubuntu-latest]
     steps:
       - name: Upload
         uses: actions/upload-artifact@v4
