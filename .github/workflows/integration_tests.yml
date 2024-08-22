@@ -33,9 +33,6 @@ name: Integration tests
 
 env:
   toolchain: nightly-2024-07-07
-  ci_baselayer: ${{ github.event.inputs.ci_baselayer || 'true' }}
-  ci_ffi: ${{ github.event.inputs.ci_ffi || 'true' }}
-  ci_profile: ${{ github.event.inputs.ci_profile || 'ci' }}
 
 concurrency:
   # https://docs.github.com/en/actions/examples/using-concurrency-expressions-and-a-test-matrix
@@ -67,21 +64,21 @@ jobs:
         shell: bash
         run: |
           if [ "${{ github.event_name }}" == "schedule" ] ; then
-            echo "CI_FFI=false" >> $GITHUB_OUTPUT
+            echo "CI_FFI=false" >> $GITHUB_ENV
             if [ "${{ github.event.schedule }}" == "0 2 * * *" ] ; then
-              echo "CI_PROFILE=(not @long-running)" >> $GITHUB_OUTPUT
+              echo "CI_PROFILE=(not @long-running)" >> $GITHUB_ENV
             elif [ "${{ github.event.schedule }}" == "0 12 * * 6" ] ; then
-              echo "CI_PROFILE=@long-running" >> $GITHUB_OUTPUT
+              echo "CI_PROFILE=@long-running" >> $GITHUB_ENV
             fi
           else
             echo "CI ..."
-            echo "CI_PROFILE=@critical and (not @long-running)" >> $GITHUB_OUTPUT
+            echo "CI_PROFILE=@critical and (not @long-running)" >> $GITHUB_ENV
             CI_BASELAYER=${{ inputs.ci_baselayer }}
             echo "Run binary - ${CI_BASELAYER}"
-            echo "CI_BASELAYER=${CI_BASELAYER:-true}" >> $GITHUB_OUTPUT
+            echo "CI_BASELAYER=${CI_BASELAYER:-true}" >> $GITHUB_ENV
             CI_FFI=${{ inputs.ci_ffi }}
             echo "Run FFI - ${CI_FFI}"
-            echo "CI_FFI=${CI_FFI:-true}" >> $GITHUB_OUTPUT
+            echo "CI_FFI=${CI_FFI:-true}" >> $GITHUB_ENV
           fi
 
       - name: checkout
