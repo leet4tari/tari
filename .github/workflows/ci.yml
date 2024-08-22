@@ -324,3 +324,9 @@ jobs:
         with:
           name: Event File
           path: ${{ github.event_path }}
+
+  publish-results:
+    permissions:
+      packages: write
+    uses: ./.github/workflows/publish_test_results_workflow.yml
+    secrets: inherit
