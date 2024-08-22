@@ -54,7 +54,6 @@ jobs:
         - baselayer
           args: "(not @wallet-ffi) and (not @chat-ffi)"
           arg_c: 5
-
         - ffi
           args: "(@wallet-ffi or @chat-ffi)"
           arg_c: 1
