@@ -327,6 +327,10 @@ jobs:
 
   publish-results:
     permissions:
-      packages: write
+      checks: write
+      # needed unless run with comment_mode: off
+      pull-requests: write
+      # required by download step to access artifacts API
+      actions: read
     uses: ./.github/workflows/publish_test_results_workflow.yml
     secrets: inherit
