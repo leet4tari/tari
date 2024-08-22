@@ -49,14 +49,14 @@ jobs:
     name: Cucumber tests / ${{ matrix.cucumber_test }}
     strategy:
       fail-fast: false
-    matrix:
-      include:
-        - cucumber_test: baselayer
-          args: "(not @wallet-ffi) and (not @chat-ffi)"
-          arg_c: 5
-        - cucumber_test: ffi
-          args: "(@wallet-ffi or @chat-ffi)"
-          arg_c: 1
+      matrix:
+        include:
+          - cucumber_test: baselayer
+            args: "(not @wallet-ffi) and (not @chat-ffi)"
+            arg_c: 5
+          - cucumber_test: ffi
+            args: "(@wallet-ffi or @chat-ffi)"
+            arg_c: 1
 
     # runs-on: [self-hosted, ubuntu-high-cpu]
     runs-on: [ubuntu-latest]
