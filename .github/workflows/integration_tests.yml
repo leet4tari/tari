@@ -18,10 +18,10 @@ name: Integration tests
     - cron: '0 12 * * 6'  # weekly - Saturday @ noon (long-running)
   workflow_dispatch:
     inputs:
-      ci_bins:
+      ci_baselayer:
         type: boolean
         default: true
-        description: 'run ci on binaries'
+        description: 'run ci on baselayer'
       ci_ffi:
         type: boolean
         default: true
@@ -33,6 +33,9 @@ name: Integration tests
 
 env:
   toolchain: nightly-2024-07-07
+  ci_baselayer: ${{ github.event.inputs.ci_baselayer || 'true' }}
+  ci_ffi: ${{ github.event.inputs.ci_ffi || 'true' }}
+  ci_profile: ${{ github.event.inputs.ci_profile || 'ci' }}
 
 concurrency:
   # https://docs.github.com/en/actions/examples/using-concurrency-expressions-and-a-test-matrix
@@ -42,12 +45,22 @@ concurrency:
 permissions: {}
 
 jobs:
-  steps-prep:
-    runs-on: ubuntu-latest
-    outputs:
-      CI_BINS: ${{ steps.envs_setup.outputs.CI_BINS }}
-      CI_FFI: ${{ steps.envs_setup.outputs.CI_FFI }}
-      CI_PROFILE: ${{ steps.envs_setup.outputs.CI_PROFILE }}
+  cucumber:
+    name: Cucumber tests / ${{ matrix.cucumber_test }}
+    strategy:
+      fail-fast: false
+    matrix:
+      cucumber_test:
+        - baselayer
+          args: "(not @wallet-ffi) and (not @chat-ffi)"
+          arg_c: 5
+
+        - ffi
+          args: "(@wallet-ffi or @chat-ffi)"
+          arg_c: 1
+
+    #runs-on: [self-hosted, ubuntu-high-cpu]
+    runs-on: [ubuntu-latest]
 
     steps:
       - name: Envs setup
@@ -64,26 +77,14 @@ jobs:
           else
             echo "CI ..."
             echo "CI_PROFILE=@critical and (not @long-running)" >> $GITHUB_OUTPUT
-            CI_BINS=${{ inputs.ci_bins }}
-            echo "Run binary - ${CI_BINS}"
-            echo "CI_BINS=${CI_BINS:-true}" >> $GITHUB_OUTPUT
+            CI_BASELAYER=${{ inputs.ci_baselayer }}
+            echo "Run binary - ${CI_BASELAYER}"
+            echo "CI_BASELAYER=${CI_BASELAYER:-true}" >> $GITHUB_OUTPUT
             CI_FFI=${{ inputs.ci_ffi }}
             echo "Run FFI - ${CI_FFI}"
             echo "CI_FFI=${CI_FFI:-true}" >> $GITHUB_OUTPUT
           fi
 
-  base_layer:
-    name: Cucumber tests / Base Layer
-    needs: steps-prep
-    if: ${{ env.CI_BINS == 'true' }}
-
-    env:
-      CI_BINS: ${{ needs.steps-prep.oututs.CI_BINS }}
-      CI_PROFILE: ${{ needs.steps-prep.outputs.CI_PROFILE }}
-
-    #runs-on: [self-hosted, ubuntu-high-cpu]
-    runs-on: [ubuntu-latest]
-    steps:
       - name: checkout
         uses: actions/checkout@v4
 
@@ -124,9 +125,11 @@ jobs:
             tari-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.toolchain }}-nightly
 
       - name: cargo test compile
-        run: cargo test --no-run --locked --all-features --release ${{ env.TARGET_BINS }}
+        run: |
+          cargo test --no-run --locked \
+            --all-features --release
 
-      - name: Run ${{ env.CI_PROFILE }} integration tests for binaries
+      - name: Run ${{ env.CI_PROFILE }} CI for ${{ matrix.cucumber_test }}
         timeout-minutes: 90
         run: |
           cargo test \
@@ -135,86 +138,15 @@ jobs:
             --all-features \
             --release \
             --package tari_integration_tests \
-            -- -t "${{ env.CI_PROFILE }} and (not @wallet-ffi) and (not @chat-ffi) and (not @broken)" \
-            -c 5 \
+            -- -t "${{ env.CI_PROFILE }} and ${{ matrix.args }} and (not @broken)" \
+            -c ${{ matrix.arg_c }} \
             --retry 2
 
       - name: upload artifact
         uses: actions/upload-artifact@v4  # upload test results as artifact
         if: always()
         with:
-          name: test-results-junit-baselayer-cucumber
-          path: ${{ github.workspace }}/integration_tests/cucumber-output-junit.xml
-
-  ffi:
-    name: Cucumber tests / FFI
-    needs: steps-prep
-    if: ${{ env.CI_FFI == 'true' }}
-
-    env:
-      CI_FFI: ${{ needs.steps-prep.oututs.CI_FFI }}
-      CI_PROFILE: ${{ needs.steps-prep.outputs.CI_PROFILE }}
-
-    #runs-on: [self-hosted, ubuntu-high-cpu]
-    runs-on: [ubuntu-latest]
-    steps:
-      - name: checkout
-        uses: actions/checkout@v4
-
-      - name: Setup rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          components: rustfmt, clippy
-          toolchain: ${{ env.toolchain }}
-
-      - name: Install ubuntu dependencies
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo bash scripts/install_ubuntu_dependencies.sh
-
-      - name: GH Cache cargo files and outputs
-        if: startsWith(runner.environment,'github-hosted')
-        uses: swatinem/rust-cache@v2
-
-      - name: SH Cache cargo files and outputs
-        if: startsWith(runner.environment,'self-hosted') }}
-        # Don't use rust-cache.
-        # This job runs on self-hosted, so use local-cache instead.
-        uses: maxnowack/local-cache@v2
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/registry/CACHEDIR.TAG
-            ~/.cargo/git
-            target
-          key: tari-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.toolchain }}-nightly-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            tari-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.toolchain }}-nightly-${{ hashFiles('**/Cargo.lock') }}
-            tari-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.toolchain }}-nightly
-
-      - name: cargo test compile
-        run: cargo test --no-run --locked --all-features --release ${{ env.TARGET_BINS }}
-
-      - name: Run ${{ env.CI_PROFILE }} integration tests for ffi
-        timeout-minutes: 90
-        run: |
-          cargo test \
-            --test cucumber \
-            -v \
-            --all-features \
-            --release \
-            --package tari_integration_tests \
-            -- -t "(@wallet-ffi or @chat-ffi) and ${{ env.CI_PROFILE }} and (not @broken)" \
-            -c 1 \
-            --retry 2
-
-      - name: upload artifact
-        uses: actions/upload-artifact@v4  # upload test results as artifact
-        if: always()
-        with:
-          name: test-results-junit-ffi-cucumber
+          name: test-results-junit-${{ matrix.cucumber_test }}-cucumber
           path: ${{ github.workspace }}/integration_tests/cucumber-output-junit.xml
 
   # needed for test results
