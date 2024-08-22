@@ -77,6 +77,10 @@ jobs:
     needs: steps-prep
     if: ${{ env.CI_BINS == 'true' }}
 
+    env:
+      CI_BINS: ${{ needs.steps-prep.oututs.CI_BINS }}
+      CI_PROFILE: ${{ needs.steps-prep.outputs.CI_PROFILE }}
+
     #runs-on: [self-hosted, ubuntu-high-cpu]
     runs-on: [ubuntu-latest]
     steps:
@@ -146,6 +150,10 @@ jobs:
     name: Cucumber tests / FFI
     needs: steps-prep
     if: ${{ env.CI_FFI == 'true' }}
+
+    env:
+      CI_FFI: ${{ needs.steps-prep.oututs.CI_FFI }}
+      CI_PROFILE: ${{ needs.steps-prep.outputs.CI_PROFILE }}
 
     #runs-on: [self-hosted, ubuntu-high-cpu]
     runs-on: [ubuntu-latest]
