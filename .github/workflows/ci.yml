@@ -224,8 +224,8 @@ jobs:
       - name: run the license check
         run: ./scripts/file_license_check.sh
 
-  test:
-    name: test
+  ci_tests:
+    name: ci tests
     #runs-on: [self-hosted, ubuntu-high-cpu]
     runs-on: [ubuntu-latest]
     permissions:
@@ -326,6 +326,7 @@ jobs:
           path: ${{ github.event_path }}
 
   publish-results:
+    needs: [ci_tests]
     permissions:
       checks: write
       # needed unless run with comment_mode: off

@@ -157,6 +157,7 @@ jobs:
           path: ${{ github.event_path }}
 
   publish-results:
+    needs: [cucumber]
     permissions:
       checks: write
       # needed unless run with comment_mode: off
