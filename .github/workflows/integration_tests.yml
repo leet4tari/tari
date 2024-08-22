@@ -42,32 +42,46 @@ concurrency:
 permissions: {}
 
 jobs:
-  base_layer:
-    name: Cucumber tests / Base Layer
-    #runs-on: [self-hosted, ubuntu-high-cpu]
-    runs-on: [ubuntu-latest]
-    steps:
-      - name: checkout
-        uses: actions/checkout@v4
+  steps-prep:
+    runs-on: ubuntu-latest
+    outputs:
+      CI_BINS: ${{ steps.envs_setup.outputs.CI_BINS }}
+      CI_FFI: ${{ steps.envs_setup.outputs.CI_FFI }}
+      CI_PROFILE: ${{ steps.envs_setup.outputs.CI_PROFILE }}
 
+    steps:
       - name: Envs setup
         id: envs_setup
         shell: bash
         run: |
           if [ "${{ github.event_name }}" == "schedule" ] ; then
-            echo "CI_FFI=false" >> $GITHUB_ENV
+            echo "CI_FFI=false" >> $GITHUB_OUTPUT
             if [ "${{ github.event.schedule }}" == "0 2 * * *" ] ; then
-              echo "CI_PROFILE=(not @long-running)" >> $GITHUB_ENV
+              echo "CI_PROFILE=(not @long-running)" >> $GITHUB_OUTPUT
             elif [ "${{ github.event.schedule }}" == "0 12 * * 6" ] ; then
-              echo "CI_PROFILE=@long-running" >> $GITHUB_ENV
+              echo "CI_PROFILE=@long-running" >> $GITHUB_OUTPUT
             fi
           else
             echo "CI ..."
-            echo "CI_PROFILE=@critical and (not @long-running)" >> $GITHUB_ENV
+            echo "CI_PROFILE=@critical and (not @long-running)" >> $GITHUB_OUTPUT
             CI_BINS=${{ inputs.ci_bins }}
             echo "Run binary - ${CI_BINS}"
-            echo "CI_BINS=${CI_BINS:-true}" >> $GITHUB_ENV
+            echo "CI_BINS=${CI_BINS:-true}" >> $GITHUB_OUTPUT
+            CI_FFI=${{ inputs.ci_ffi }}
+            echo "Run FFI - ${CI_FFI}"
+            echo "CI_FFI=${CI_FFI:-true}" >> $GITHUB_OUTPUT
           fi
+
+  base_layer:
+    name: Cucumber tests / Base Layer
+    needs: steps-prep
+    if: ${{ env.CI_BINS == 'true' }}
+
+    #runs-on: [self-hosted, ubuntu-high-cpu]
+    runs-on: [ubuntu-latest]
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
 
       - name: Setup rust toolchain
         uses: dtolnay/rust-toolchain@master
@@ -81,11 +95,11 @@ jobs:
           sudo apt-get update
           sudo bash scripts/install_ubuntu_dependencies.sh
 
-      - name: Cache cargo files and outputs
+      - name: GH Cache cargo files and outputs
         if: startsWith(runner.environment,'github-hosted')
-        uses: Swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@v2
 
-      - name: caching (nightly)
+      - name: SH Caching cargo files and outputs (nightly)
         if: startsWith(runner.environment,'self-hosted')
         # Don't use rust-cache.
         # Rust-cache disables a key feature of actions/cache: restoreKeys.
@@ -109,7 +123,6 @@ jobs:
         run: cargo test --no-run --locked --all-features --release ${{ env.TARGET_BINS }}
 
       - name: Run ${{ env.CI_PROFILE }} integration tests for binaries
-        if: ${{ env.CI_BINS == 'true' }}
         timeout-minutes: 90
         run: |
           cargo test \
@@ -131,51 +144,33 @@ jobs:
 
   ffi:
     name: Cucumber tests / FFI
+    needs: steps-prep
+    if: ${{ env.CI_FFI == 'true' }}
+
     #runs-on: [self-hosted, ubuntu-high-cpu]
     runs-on: [ubuntu-latest]
     steps:
       - name: checkout
         uses: actions/checkout@v4
 
-      - name: Envs setup
-        id: envs_setup
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" == "schedule" ] ; then
-            echo "CI_FFI=false" >> $GITHUB_ENV
-            if [ "${{ github.event.schedule }}" == "0 2 * * *" ] ; then
-              echo "CI_PROFILE=(not @long-running)" >> $GITHUB_ENV
-            elif [ "${{ github.event.schedule }}" == "0 12 * * 6" ] ; then
-              echo "CI_PROFILE=@long-running" >> $GITHUB_ENV
-            fi
-          else
-            echo "CI ..."
-            echo "CI_PROFILE=@critical and (not @long-running)" >> $GITHUB_ENV
-            CI_FFI=${{ inputs.ci_ffi }}
-            echo "Run FFI - ${CI_FFI}"
-            echo "CI_FFI=${CI_FFI:-true}" >> $GITHUB_ENV
-          fi
-
       - name: Setup rust toolchain
-        if: ${{ env.CI_FFI == 'true' }}
         uses: dtolnay/rust-toolchain@master
         with:
           components: rustfmt, clippy
           toolchain: ${{ env.toolchain }}
 
       - name: Install ubuntu dependencies
-        if: ${{ env.CI_FFI == 'true' }}
         shell: bash
         run: |
           sudo apt-get update
           sudo bash scripts/install_ubuntu_dependencies.sh
 
-      - name: Cache cargo files and outputs
+      - name: GH Cache cargo files and outputs
         if: startsWith(runner.environment,'github-hosted')
-        uses: Swatinem/rust-cache@v2
+        uses: swatinem/rust-cache@v2
 
-      - name: Cache cargo files and outputs
-        if: ${{ ( startsWith(runner.environment,'self-hosted') ) && ( env.CI_FFI == 'true' ) }}
+      - name: SH Cache cargo files and outputs
+        if: startsWith(runner.environment,'self-hosted') }}
         # Don't use rust-cache.
         # This job runs on self-hosted, so use local-cache instead.
         uses: maxnowack/local-cache@v2
@@ -192,11 +187,9 @@ jobs:
             tari-${{ runner.os }}-${{ runner.cpu-model }}-${{ env.toolchain }}-nightly
 
       - name: cargo test compile
-        if: ${{ env.CI_FFI == 'true' }}
         run: cargo test --no-run --locked --all-features --release ${{ env.TARGET_BINS }}
 
       - name: Run ${{ env.CI_PROFILE }} integration tests for ffi
-        if: ${{ env.CI_FFI == 'true' }}
         timeout-minutes: 90
         run: |
           cargo test \
