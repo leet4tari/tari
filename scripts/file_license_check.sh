@@ -1,5 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env bash
+#
 # Must be run from the repo root
+#
+
+set -e
+
+diffparms=${diffparms:-"-u --suppress-blank-empty --strip-trailing-cr --color=never"}
+rgTemp=${rgTemp:-$(mktemp)}
 
 # rg -i "Copyright.*The Tari Project" --files-without-match \
 #    -g '!*.{Dockerfile,asc,bat,config,config.js,css,csv,drawio,env,gitkeep,hbs,html,ini,iss,json,lock,md,min.js,ps1,py,rc,scss,sh,sql,svg,toml,txt,yml,vue}' . \
@@ -13,18 +20,24 @@ rg -i "Copyright.*The Tari Project" --files-without-match \
         if [[ -n $(basename "$file" | grep -E '\.') ]]; then
             echo "$file"
         fi
-    done | sort > /tmp/rgtemp
+    done | sort > ${rgTemp}
 
 # Sort the .license.ignore file as sorting seems to behave differently on different platforms
-cat .license.ignore | sort > /tmp/.license.ignore
+licenseIgnoreTemp=${licenseIgnoreTemp:-$(mktemp)}
+cat .license.ignore | sort > ${licenseIgnoreTemp}
 
-DIFFS=$(diff -u --strip-trailing-cr /tmp/.license.ignore /tmp/rgtemp)
+DIFFS=$( diff ${diffparms} ${licenseIgnoreTemp} ${rgTemp} || true )
 
-if [ -n "$DIFFS" ]; then
-    echo "New files detected that either need copyright/license identifiers added, or they need to be added to .license.ignore"
+# clean up
+rm -vf ${rgTemp}
+rm -vf ${licenseIgnoreTemp}
+
+if [ -n "${DIFFS}" ]; then
+    echo "New files detected that either need copyright/license identifiers added, "
+    echo "or they need to be added to .license.ignore"
     echo "NB: The ignore file must be sorted alphabetically!"
 
     echo "Diff:"
-    echo "$DIFFS"
+    echo "${DIFFS}"
     exit 1
 fi
