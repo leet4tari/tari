@@ -55,6 +55,7 @@ overflow-checks = true
 
 [patch.crates-io]
 liblmdb-sys = { git = "https://github.com/tari-project/lmdb-rs", tag = "0.7.6-tari.1" }
+randomx-rs = { git = "https://github.com/humb1t/randomx-rs", branch = "build-using-cmake-crate" }
 
 [workspace.dependencies]
 tari_network = { path = "network/core" }
