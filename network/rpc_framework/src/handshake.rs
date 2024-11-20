@@ -11,7 +11,7 @@ use tracing::{debug, error, span, warn, Instrument, Level};
 
 use crate::{error::HandshakeRejectReason, framing::CanonicalFraming, proto};
 
-const LOG_TARGET: &str = "comms::rpc::handshake";
+const LOG_TARGET: &str = "network::rpc::handshake";
 
 /// Supported RPC protocol versions.
 /// Currently only v0 is supported
@@ -81,7 +81,7 @@ where T: AsyncRead + AsyncWrite + Unpin
                 Err(RpcHandshakeError::ClientNoSupportedVersion)
             },
             Ok(Some(Err(err))) => {
-                error!(target: LOG_TARGET, "Error during handshake: {}", err);
+                debug!(target: LOG_TARGET, "IO error during handshake: {}", err);
                 Err(err.into())
             },
             Ok(None) => {

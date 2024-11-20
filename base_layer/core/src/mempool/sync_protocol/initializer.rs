@@ -20,17 +20,15 @@
 //  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 //  USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use std::time::Duration;
-
 use log::*;
 use tari_network::NetworkHandle;
 use tari_service_framework::{async_trait, ServiceInitializationError, ServiceInitializer, ServiceInitializerContext};
-use tokio::{sync::mpsc, time::sleep};
+use tokio::sync::mpsc;
 
 use crate::{
     base_node::{comms_interface::LocalNodeCommsInterface, StateMachineHandle},
     mempool::{
-        sync_protocol::{MempoolSyncProtocol, MEMPOOL_SYNC_PROTOCOL},
+        sync_protocol::{MempoolSyncProtocol, NewTransactionNotification, MEMPOOL_SYNC_PROTOCOL},
         Mempool,
         MempoolServiceConfig,
     },
@@ -41,11 +39,20 @@ const LOG_TARGET: &str = "c::mempool::sync_protocol";
 pub struct MempoolSyncInitializer {
     config: MempoolServiceConfig,
     mempool: Mempool,
+    want_list_rx: Option<mpsc::UnboundedReceiver<NewTransactionNotification>>,
 }
 
 impl MempoolSyncInitializer {
-    pub fn new(config: MempoolServiceConfig, mempool: Mempool) -> Self {
-        Self { mempool, config }
+    pub fn new(
+        config: MempoolServiceConfig,
+        mempool: Mempool,
+        want_list_rx: mpsc::UnboundedReceiver<NewTransactionNotification>,
+    ) -> Self {
+        Self {
+            mempool,
+            config,
+            want_list_rx: Some(want_list_rx),
+        }
     }
 }
 
@@ -55,6 +62,10 @@ impl ServiceInitializer for MempoolSyncInitializer {
         debug!(target: LOG_TARGET, "Initializing Mempool Sync Service");
         let config = self.config.clone();
         let mempool = self.mempool.clone();
+        let want_list_rx = self
+            .want_list_rx
+            .take()
+            .expect("MempoolSyncInitializer initialized more than once");
 
         let mut mdc = vec![];
         log_mdc::iter(|k, v| mdc.push((k.to_owned(), v.to_owned())));
@@ -68,6 +79,8 @@ impl ServiceInitializer for MempoolSyncInitializer {
             let state_machine = handles.expect_handle::<StateMachineHandle>();
             let base_node = handles.expect_handle::<LocalNodeCommsInterface>();
 
+            // Subscribe early to not miss connect events
+            let network_events = network.subscribe_events();
             let mut status_watch = state_machine.get_status_info_watch();
             if !status_watch.borrow().state_info.is_synced() {
                 debug!(target: LOG_TARGET, "Waiting for node to do initial sync...");
@@ -84,14 +97,13 @@ impl ServiceInitializer for MempoolSyncInitializer {
                         target: LOG_TARGET,
                         "Mempool sync still on hold, waiting for node to do initial sync",
                     );
-                    sleep(Duration::from_secs(30)).await;
                 }
                 log_mdc::extend(mdc.clone());
             }
             let base_node_events = base_node.get_block_event_stream();
 
-            MempoolSyncProtocol::new(config, notif_rx, mempool, network, base_node_events)
-                .run()
+            MempoolSyncProtocol::new(config, notif_rx, mempool, network, base_node_events, want_list_rx)
+                .run(network_events)
                 .await;
         });
 

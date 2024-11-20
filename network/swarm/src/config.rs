@@ -13,7 +13,7 @@ pub struct Config {
     pub user_agent: String,
     pub messaging_protocol: String,
     pub ping: ping::Config,
-    pub max_connections_per_peer: Option<u32>,
+    pub max_inbound_connections_per_peer: Option<u32>,
     pub enable_mdns: bool,
     pub enable_relay: bool,
     pub enable_messaging: bool,
@@ -31,7 +31,7 @@ impl Default for Config {
             user_agent: "/tari/unknown/0.0.1".to_string(),
             messaging_protocol: "/tari/messaging/0.0.1".to_string(),
             ping: ping::Config::default(),
-            max_connections_per_peer: Some(3),
+            max_inbound_connections_per_peer: None,
             enable_mdns: false,
             enable_relay: false,
             enable_messaging: true,
@@ -40,8 +40,8 @@ impl Default for Config {
             relay_reservation_limits: RelayReservationLimits::default(),
             // This is the default for identify
             identify_interval: Duration::from_secs(5 * 60),
-            // Double the libp2p default
-            gossipsub_max_message_size: 128 * 1024,
+            // 64Kib is the libp2p default
+            gossipsub_max_message_size: 64 * 1024,
         }
     }
 }

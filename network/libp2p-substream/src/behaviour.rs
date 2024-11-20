@@ -9,8 +9,7 @@ use std::{
 use libp2p::{
     core::{transport::PortUse, Endpoint},
     swarm::{
-        dial_opts::DialOpts,
-        AddressChange,
+        dial_opts::{DialOpts, PeerCondition},
         ConnectionClosed,
         ConnectionDenied,
         ConnectionHandler,
@@ -89,14 +88,19 @@ impl Behaviour {
 
     pub fn open_substream(&mut self, peer_id: PeerId, protocol: StreamProtocol) -> StreamId {
         let stream_id = self.next_outbound_stream_id();
+        tracing::debug!("open substream request to {peer_id}: stream={stream_id} {protocol}");
         let request = OpenStreamRequest::new(stream_id, peer_id, protocol);
-
         match self.get_connections(&peer_id) {
             Some(connections) => {
                 let ix = (stream_id as usize) % connections.len();
                 let conn = &mut connections[ix];
-                conn.pending_streams.insert(stream_id);
+                conn.pending_outbound_streams.insert(stream_id);
                 let conn_id = conn.id;
+                tracing::debug!(
+                    "open substream: using conn={conn_id} out of {} connnection(s) to {peer_id}: stream={stream_id} {}",
+                    connections.len(),
+                    request.protocol()
+                );
                 self.pending_events.push_back(ToSwarm::NotifyHandler {
                     peer_id,
                     handler: NotifyHandler::One(conn_id),
@@ -104,8 +108,13 @@ impl Behaviour {
                 });
             },
             None => {
+                tracing::debug!(
+                    "open substream: no connection to peer {peer_id}: protocol: {}, stream: {}",
+                    request.protocol(),
+                    request.stream_id()
+                );
                 self.pending_events.push_back(ToSwarm::Dial {
-                    opts: DialOpts::peer_id(peer_id).build(),
+                    opts: DialOpts::peer_id(peer_id).condition(PeerCondition::Always).build(),
                 });
                 self.pending_outbound_streams.entry(peer_id).or_default().push(request);
             },
@@ -131,43 +140,26 @@ impl Behaviour {
         let connections = self
             .connected
             .get_mut(&peer_id)
-            .expect("Expected some established connection to peer before closing.");
+            .expect("Expected connection to be established before closing.");
 
         let connection = connections
             .iter()
             .position(|c| c.id == connection_id)
-            .map(|p: usize| connections.remove(p))
-            .expect("Expected connection to be established before closing.");
+            .map(|p| connections.remove(p))
+            .expect("Expected some established connection to peer before closing.");
 
         debug_assert_eq!(connections.is_empty(), remaining_established == 0);
         if connections.is_empty() {
             self.connected.remove(&peer_id);
         }
 
-        for stream_id in connection.pending_streams {
+        for stream_id in connection.pending_outbound_streams {
             self.pending_events
-                .push_back(ToSwarm::GenerateEvent(Event::InboundFailure {
+                .push_back(ToSwarm::GenerateEvent(Event::OutboundFailure {
                     peer_id,
                     stream_id,
                     error: Error::ConnectionClosed,
                 }));
-        }
-    }
-
-    fn on_address_change(&mut self, address_change: AddressChange) {
-        let AddressChange {
-            peer_id,
-            connection_id,
-            new,
-            ..
-        } = address_change;
-        if let Some(connections) = self.connected.get_mut(&peer_id) {
-            for connection in connections {
-                if connection.id == connection_id {
-                    connection.remote_address = Some(new.get_remote_address().clone());
-                    return;
-                }
-            }
         }
     }
 
@@ -181,15 +173,15 @@ impl Behaviour {
             // it is implied that we are not connected to the peer, since pending
             // outgoing stream requests are drained when a connection is established and
             // only created when a peer is not connected when a request is made.
-            // Therefore these requests must be considered failed, even if there is
+            // Therefor these requests must be considered failed, even if there is
             // another, concurrent dialing attempt ongoing.
             if let Some(pending) = self.pending_outbound_streams.remove(&peer) {
                 let no_addresses = matches!(&error, DialError::NoAddresses);
+                self.pending_events.reserve(pending.len());
                 for request in pending {
                     self.pending_events
                         .push_back(ToSwarm::GenerateEvent(Event::OutboundFailure {
                             peer_id: peer,
-                            protocol: request.protocol().clone(),
                             stream_id: request.stream_id(),
                             error: if no_addresses {
                                 Error::NoAddressesForPeer
@@ -204,18 +196,12 @@ impl Behaviour {
         }
     }
 
-    fn on_connection_established(
-        &mut self,
-        handler: &mut Handler,
-        peer_id: PeerId,
-        connection_id: ConnectionId,
-        remote_address: Option<Multiaddr>,
-    ) {
-        let mut connection = Connection::new(connection_id, remote_address);
+    fn on_connection_established(&mut self, handler: &mut Handler, peer_id: PeerId, connection_id: ConnectionId) {
+        let mut connection = Connection::new(connection_id);
 
         if let Some(pending_streams) = self.pending_outbound_streams.remove(&peer_id) {
             for stream in pending_streams {
-                connection.pending_streams.insert(stream.stream_id());
+                connection.pending_outbound_streams.insert(stream.stream_id());
                 handler.on_behaviour_event(stream.into());
             }
         }
@@ -237,10 +223,10 @@ impl NetworkBehaviour for Behaviour {
         connection_id: ConnectionId,
         peer: PeerId,
         _local_addr: &Multiaddr,
-        remote_addr: &Multiaddr,
+        _remote_addr: &Multiaddr,
     ) -> Result<THandler<Self>, ConnectionDenied> {
         let mut handler = Handler::new(peer, self.protocols.clone());
-        self.on_connection_established(&mut handler, peer, connection_id, Some(remote_addr.clone()));
+        self.on_connection_established(&mut handler, peer, connection_id);
 
         Ok(handler)
     }
@@ -249,12 +235,12 @@ impl NetworkBehaviour for Behaviour {
         &mut self,
         connection_id: ConnectionId,
         peer: PeerId,
-        remote_addr: &Multiaddr,
+        _remote_addr: &Multiaddr,
         _role_override: Endpoint,
         _port_use: PortUse,
     ) -> Result<THandler<Self>, ConnectionDenied> {
         let mut handler = Handler::new(peer, self.protocols.clone());
-        self.on_connection_established(&mut handler, peer, connection_id, Some(remote_addr.clone()));
+        self.on_connection_established(&mut handler, peer, connection_id);
         Ok(handler)
     }
 
@@ -262,7 +248,6 @@ impl NetworkBehaviour for Behaviour {
         match event {
             FromSwarm::ConnectionEstablished(_) => {},
             FromSwarm::ConnectionClosed(connection_closed) => self.on_connection_closed(connection_closed),
-            FromSwarm::AddressChange(address_change) => self.on_address_change(address_change),
             FromSwarm::DialFailure(dial_failure) => self.on_dial_failure(dial_failure),
             _ => {},
         }
@@ -278,7 +263,7 @@ impl NetworkBehaviour for Behaviour {
             Event::SubstreamOpen { peer_id, stream_id, .. } => {
                 if let Some(connections) = self.connected.get_mut(peer_id) {
                     for connection in connections {
-                        connection.pending_streams.remove(stream_id);
+                        connection.pending_outbound_streams.remove(stream_id);
                     }
                 }
             },
@@ -294,9 +279,10 @@ impl NetworkBehaviour for Behaviour {
     fn poll(&mut self, _cx: &mut Context<'_>) -> Poll<ToSwarm<Self::ToSwarm, THandlerInEvent<Self>>> {
         if let Some(event) = self.pending_events.pop_front() {
             return Poll::Ready(event);
-        }
-        if self.pending_events.capacity() > EMPTY_QUEUE_SHRINK_THRESHOLD {
+        } else if self.pending_events.capacity() > EMPTY_QUEUE_SHRINK_THRESHOLD {
             self.pending_events.shrink_to_fit();
+        } else {
+            // nothing
         }
 
         Poll::Pending
@@ -307,16 +293,14 @@ impl NetworkBehaviour for Behaviour {
 #[derive(Debug)]
 struct Connection {
     id: ConnectionId,
-    remote_address: Option<Multiaddr>,
-    pending_streams: HashSet<StreamId>,
+    pending_outbound_streams: HashSet<StreamId>,
 }
 
 impl Connection {
-    fn new(id: ConnectionId, remote_address: Option<Multiaddr>) -> Self {
+    fn new(id: ConnectionId) -> Self {
         Self {
             id,
-            remote_address,
-            pending_streams: HashSet::new(),
+            pending_outbound_streams: HashSet::new(),
         }
     }
 }

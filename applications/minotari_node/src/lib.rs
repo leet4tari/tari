@@ -58,7 +58,10 @@ use tari_common_types::grpc_authentication::GrpcAuthentication;
 use tari_network::{identity, multiaddr::Multiaddr};
 use tari_shutdown::{Shutdown, ShutdownSignal};
 use tokio::task;
-use tonic::transport::{Identity, Server, ServerTlsConfig};
+use tonic::{
+    codegen::InterceptedService,
+    transport::{Identity, Server, ServerTlsConfig},
+};
 
 use crate::cli::Cli;
 pub use crate::config::{ApplicationConfig, BaseNodeConfig, DatabaseType};
@@ -95,6 +98,7 @@ pub async fn run_base_node(
         grpc_enabled: false,
         mining_enabled: false,
         second_layer_grpc_enabled: false,
+        reachability: None,
     };
 
     run_base_node_with_cli(node_identity, config, cli, shutdown).await
@@ -194,15 +198,19 @@ async fn run_grpc(
     let grpc_address = multiaddr_to_socketaddr(&grpc_address)?;
     let auth = ServerAuthenticationInterceptor::new(auth_config)
         .ok_or(anyhow::anyhow!("Unable to prepare server gRPC authentication"))?;
-    let service = minotari_app_grpc::tari_rpc::base_node_server::BaseNodeServer::with_interceptor(grpc, auth);
+    let service = minotari_app_grpc::tari_rpc::base_node_server::BaseNodeServer::new(grpc)
+        .max_encoding_message_size(10 * 1024 * 1024)
+        .max_decoding_message_size(10 * 1024 * 1024);
+    let service = InterceptedService::new(service, auth);
 
-    let mut server_builder = if let Some(identity) = tls_identity {
+    let server_builder = if let Some(identity) = tls_identity {
         Server::builder().tls_config(ServerTlsConfig::new().identity(identity))?
     } else {
         Server::builder()
     };
 
     server_builder
+        .max_frame_size(Some(10 * 1024 * 1024))
         .add_service(service)
         .serve_with_shutdown(grpc_address, interrupt_signal.map(|_| ()))
         .await

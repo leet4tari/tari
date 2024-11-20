@@ -37,7 +37,14 @@ use tari_rpc_framework::{
     Substream,
 };
 use tari_swarm::{
-    libp2p::{gossipsub, gossipsub::IdentTopic, swarm::dial_opts::DialOpts, Multiaddr, PeerId, StreamProtocol},
+    libp2p::{
+        gossipsub,
+        gossipsub::{IdentTopic, MessageAcceptance, MessageId},
+        swarm::dial_opts::DialOpts,
+        Multiaddr,
+        PeerId,
+        StreamProtocol,
+    },
     substream::{NegotiatedSubstream, ProtocolNotification},
 };
 use tokio::{
@@ -51,9 +58,11 @@ use crate::{
     error::NetworkingHandleError,
     event::NetworkEvent,
     peer::{Peer, PeerInfo},
+    relay_state::RelayStats,
     BannedPeer,
     DialWaiter,
     DiscoveryResult,
+    GossipMessage,
     GossipPublisher,
     GossipSubscription,
     NetworkError,
@@ -81,7 +90,7 @@ pub enum NetworkingRequest {
     },
     SubscribeTopic {
         topic: IdentTopic,
-        inbound: mpsc::UnboundedSender<(PeerId, gossipsub::Message)>,
+        inbound: mpsc::UnboundedSender<GossipMessage<gossipsub::Message>>,
         reply: Reply<mpsc::Sender<(IdentTopic, Vec<u8>)>>,
     },
     UnsubscribeTopic {
@@ -91,6 +100,11 @@ pub enum NetworkingRequest {
     IsSubscribedTopic {
         topic: IdentTopic,
         reply: Reply<bool>,
+    },
+    ReportGossipMessageValidationResult {
+        message_id: gossipsub::MessageId,
+        propagation_source: PeerId,
+        acceptance: MessageAcceptance,
     },
     OpenSubstream {
         peer_id: PeerId,
@@ -159,6 +173,9 @@ pub enum NetworkingRequest {
     GetSeedPeers {
         reply: Reply<Vec<Peer>>,
     },
+    GetRelayStats {
+        reply: Reply<RelayStats>,
+    },
 }
 
 #[derive(Debug)]
@@ -211,6 +228,27 @@ impl NetworkHandle {
             .await
             .map_err(|_| NetworkingHandleError::ServiceHasShutdown)?;
         rx.await?
+    }
+
+    pub async fn report_gossip_message_validation_result(
+        &self,
+        message_id: MessageId,
+        propagation_source: PeerId,
+        acceptance: MessageAcceptance,
+    ) -> Result<(), NetworkError> {
+        self.tx_request
+            .send(NetworkingRequest::ReportGossipMessageValidationResult {
+                message_id,
+                propagation_source,
+                acceptance,
+            })
+            .await
+            .map_err(|_| NetworkingHandleError::ServiceHasShutdown)?;
+        // NOTE: this does not have a reply because:
+        // 1. any error is reported in the logs in the network. The caller would likely not be doing anything more than
+        //    this.
+        // 2. the caller does not have to wait at all when sending this (a full request channel aside)
+        Ok(())
     }
 
     /// Add a notifier for these protocols. An unbounded sender is used to prevent potential lockups waiting for
@@ -451,6 +489,15 @@ impl NetworkHandle {
         let (tx, rx) = oneshot::channel();
         self.tx_request
             .send(NetworkingRequest::GetAveragePeerLatency { reply: tx })
+            .await
+            .map_err(|_| NetworkingHandleError::ServiceHasShutdown)?;
+        rx.await?
+    }
+
+    pub async fn get_relay_stats(&self) -> Result<RelayStats, NetworkError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx_request
+            .send(NetworkingRequest::GetRelayStats { reply: tx })
             .await
             .map_err(|_| NetworkingHandleError::ServiceHasShutdown)?;
         rx.await?

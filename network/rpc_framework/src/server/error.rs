@@ -22,12 +22,11 @@
 
 use std::io;
 
-use bytes::BytesMut;
 use libp2p::{PeerId, StreamProtocol};
 use prost::DecodeError;
 use tokio::sync::oneshot;
 
-use crate::{handshake::RpcHandshakeError, proto, server::early_close::EarlyCloseError};
+use crate::{handshake::RpcHandshakeError, proto};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RpcServerError {
@@ -57,16 +56,14 @@ pub enum RpcServerError {
     ServiceCallExceededDeadline,
     #[error("Stream read exceeded deadline")]
     ReadStreamExceededDeadline,
-    #[error("Early close: {0}")]
-    EarlyClose(#[from] EarlyCloseError<BytesMut>),
     #[error("Protocol error: {0}")]
     ProtocolError(String),
 }
 
 impl RpcServerError {
-    pub fn early_close_io(&self) -> Option<&io::Error> {
+    pub fn io(&self) -> Option<&io::Error> {
         match self {
-            Self::EarlyClose(e) => e.io(),
+            Self::Io(e) => Some(e),
             _ => None,
         }
     }
