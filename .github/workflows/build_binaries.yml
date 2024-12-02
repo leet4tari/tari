@@ -219,7 +219,7 @@ jobs:
         if: startsWith(runner.os,'Windows')
         run: |
           # Bug in choco - need to install each package individually
-          vcpkg install openssl:x64-windows-static
+          # vcpkg install openssl:x64-windows-static
           choco upgrade protoc -y
           rustup target add ${{ matrix.builds.target }}
 
@@ -271,8 +271,8 @@ jobs:
           echo "SHELL_EXT=.bat" >> $GITHUB_ENV
           echo "TS_DIST=\dist" >> $GITHUB_ENV
           echo "PLATFORM_SPECIFIC_DIR=windows" >> $GITHUB_ENV
-          echo "VCPKG_ROOT=C:\vcpkg" >> $GITHUB_ENV
-          echo "OPENSSL_DIR=C:\vcpkg\packages\openssl_x64-windows-static" >> $GITHUB_ENV
+          # echo "VCPKG_ROOT=C:\vcpkg" >> $GITHUB_ENV
+          # echo "OPENSSL_DIR=C:\vcpkg\packages\openssl_x64-windows-static" >> $GITHUB_ENV
 
       - name: Cache cargo files and outputs
         if: ${{ ( ! startsWith(github.ref, 'refs/tags/v') ) && ( ! matrix.builds.cross ) && ( env.CARGO_CACHE ) }}
