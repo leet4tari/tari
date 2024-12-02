@@ -221,6 +221,8 @@ jobs:
           # Bug in choco - need to install each package individually
           # vcpkg install openssl:x64-windows-static
           choco upgrade protoc -y
+          # Should already be installed
+          choco upgrade strawberryperl -y
           rustup target add ${{ matrix.builds.target }}
 
       - name: Set environment variables - Nix
@@ -273,6 +275,7 @@ jobs:
           echo "PLATFORM_SPECIFIC_DIR=windows" >> $GITHUB_ENV
           # echo "VCPKG_ROOT=C:\vcpkg" >> $GITHUB_ENV
           # echo "OPENSSL_DIR=C:\vcpkg\packages\openssl_x64-windows-static" >> $GITHUB_ENV
+          echo "C:\Strawberry\perl\bin" >> $GITHUB_PATH
 
       - name: Cache cargo files and outputs
         if: ${{ ( ! startsWith(github.ref, 'refs/tags/v') ) && ( ! matrix.builds.cross ) && ( env.CARGO_CACHE ) }}
