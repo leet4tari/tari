@@ -15,7 +15,7 @@ name: Build minotari_ledger_wallet
 env:
   TS_FILENAME: "minotari_ledger_wallet"
   SHARUN: "shasum --algorithm 256"
-  LEDGER_DOCKER_VERSION: 3.43.0
+  LEDGER_DOCKER_VERSION: 3.42.0
 
 concurrency:
   # https://docs.github.com/en/actions/examples/using-concurrency-expressions-and-a-test-matrix
