@@ -20,7 +20,7 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tui::{
+use ratatui::{
     backend::Backend,
     layout::Rect,
     style::{Color, Modifier, Style},
@@ -66,7 +66,7 @@ impl<B: Backend> TabsContainer<B> {
         }
     }
 
-    pub fn draw_titles(&self, f: &mut Frame<B>, area: Rect, app_state: &AppState) {
+    pub fn draw_titles(&self, f: &mut Frame, area: Rect, app_state: &AppState) {
         let titles = self
             .titles
             .iter()
@@ -83,13 +83,13 @@ impl<B: Backend> TabsContainer<B> {
         f.render_widget(tabs, area);
     }
 
-    pub fn draw_content(&mut self, f: &mut Frame<B>, area: Rect, app_state: &mut AppState) {
+    pub fn draw_content(&mut self, f: &mut Frame, area: Rect, app_state: &mut AppState) {
         self.tabs[self.index].draw(f, area, app_state);
     }
 }
 
 impl<B: Backend> Component<B> for TabsContainer<B> {
-    fn draw(&mut self, _: &mut Frame<B>, _: Rect, _: &AppState) {
+    fn draw(&mut self, _: &mut Frame, _: Rect, _: &AppState) {
         // Use draw_titles and draw_content instead,
         unimplemented!()
     }

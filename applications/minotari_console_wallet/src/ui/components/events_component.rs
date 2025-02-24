@@ -1,7 +1,7 @@
 // Copyright 2022 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use tui::{
+use ratatui::{
     backend::Backend,
     layout::{Constraint, Rect},
     widgets::{Block, Borders, Row, Table, TableState},
@@ -26,7 +26,7 @@ impl EventsComponent {
 }
 
 impl<B: Backend> Component<B> for EventsComponent {
-    fn draw(&mut self, f: &mut Frame<B>, area: Rect, app_state: &AppState) {
+    fn draw(&mut self, f: &mut Frame, area: Rect, app_state: &AppState) {
         let events = app_state.get_all_events();
         let rows: Vec<_> = events
             .iter()

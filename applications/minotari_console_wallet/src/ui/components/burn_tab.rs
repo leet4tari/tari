@@ -10,7 +10,7 @@ use tari_core::transactions::{
     transaction_components::encrypted_data::{PaymentId, TxType},
 };
 use tokio::{runtime::Handle, sync::watch};
-use tui::{
+use ratatui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -70,7 +70,7 @@ impl BurnTab {
     // casting here is okay as we only use it for draw widths
     #[allow(clippy::cast_possible_truncation)]
     #[allow(clippy::too_many_lines)]
-    fn draw_burn_form<B>(&self, f: &mut Frame<B>, area: Rect, _app_state: &AppState)
+    fn draw_burn_form<B>(&self, f: &mut Frame, area: Rect, _app_state: &AppState)
     where B: Backend {
         let block = Block::default().borders(Borders::ALL).title(Span::styled(
             "Burn Minotari",
@@ -210,7 +210,7 @@ impl BurnTab {
         }
     }
 
-    fn draw_proofs<B>(&mut self, f: &mut Frame<B>, area: Rect, app_state: &AppState)
+    fn draw_proofs<B>(&mut self, f: &mut Frame, area: Rect, app_state: &AppState)
     where B: Backend {
         let block = Block::default().borders(Borders::ALL).title(Span::styled(
             "Burnt Proofs",
@@ -477,7 +477,7 @@ impl BurnTab {
 
 impl<B: Backend> Component<B> for BurnTab {
     #[allow(clippy::too_many_lines)]
-    fn draw(&mut self, f: &mut Frame<B>, area: Rect, app_state: &AppState) {
+    fn draw(&mut self, f: &mut Frame, area: Rect, app_state: &AppState) {
         let areas = Layout::default()
             .constraints(
                 [

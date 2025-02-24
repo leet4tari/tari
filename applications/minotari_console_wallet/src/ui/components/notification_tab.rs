@@ -9,11 +9,11 @@
 // add_notification method.
 
 use tokio::runtime::Handle;
-use tui::{
+use ratatui::{
     backend::Backend,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Span, Spans},
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
@@ -27,7 +27,7 @@ impl NotificationTab {
         Self {}
     }
 
-    fn draw_notifications<B>(&mut self, f: &mut Frame<B>, area: Rect, app_state: &AppState)
+    fn draw_notifications<B>(&mut self, f: &mut Frame, area: Rect, app_state: &AppState)
     where B: Backend {
         let span_vec = vec![
             Span::raw("Press "),
@@ -35,7 +35,7 @@ impl NotificationTab {
             Span::raw(" to clear notifications"),
         ];
 
-        let instructions = Paragraph::new(Spans::from(span_vec)).wrap(Wrap { trim: false });
+        let instructions = Paragraph::new(Line::from(span_vec)).wrap(Wrap { trim: false });
 
         let block = Block::default().borders(Borders::ALL).title(Span::styled(
             "Notifications",
@@ -51,7 +51,7 @@ impl NotificationTab {
             .iter()
             .rev()
             .map(|(time, line)| {
-                Spans::from(vec![
+                Line::from(vec![
                     Span::styled(
                         time.format("%Y-%m-%d %H:%M:%S ").to_string(),
                         Style::default().fg(Color::LightGreen),
@@ -68,7 +68,7 @@ impl NotificationTab {
 }
 
 impl<B: Backend> Component<B> for NotificationTab {
-    fn draw(&mut self, f: &mut Frame<B>, area: Rect, app_state: &AppState) {
+    fn draw(&mut self, f: &mut Frame, area: Rect, app_state: &AppState) {
         let areas = Layout::default()
             .constraints([Constraint::Min(42)].as_ref())
             .split(area);
@@ -80,15 +80,15 @@ impl<B: Backend> Component<B> for NotificationTab {
         Handle::current().block_on(app_state.mark_notifications_as_read());
     }
 
-    fn format_title(&self, title: &str, app_state: &AppState) -> Spans {
+    fn format_title(&self, title: &str, app_state: &AppState) -> Line {
         // Create custom title based on notifications count.
         if app_state.unread_notifications_count() > 0 {
-            Spans::from(Span::styled(
+            Line::from(Span::styled(
                 format!("{}({})", title, app_state.unread_notifications_count()),
                 Style::default().fg(Color::LightGreen),
             ))
         } else {
-            Spans::from(Span::styled(title.to_owned(), Style::default().fg(Color::White)))
+            Line::from(Span::styled(title.to_owned(), Style::default().fg(Color::White)))
         }
     }
 

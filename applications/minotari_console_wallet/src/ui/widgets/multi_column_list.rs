@@ -20,7 +20,7 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tui::{
+use ratatui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     style::Style,
@@ -75,7 +75,7 @@ where T: Into<Vec<ListItem<'a>>>
 
     // casting here is okay as we only use it draw the header length
     #[allow(clippy::cast_possible_truncation)]
-    pub fn render<B: Backend>(mut self, f: &mut Frame<B>, area: Rect, state: &mut ListState) {
+    pub fn render<B: Backend>(mut self, f: &mut Frame, area: Rect, state: &mut ListState) {
         // This accounts for the box border
         let mut constraints = vec![Constraint::Length(1)];
         let mut sum_width = 0;

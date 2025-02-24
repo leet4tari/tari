@@ -44,7 +44,7 @@ use crossterm::{
 };
 use log::*;
 use tokio::runtime::Handle;
-use tui::{backend::CrosstermBackend, Terminal};
+use ratatui::{backend::CrosstermBackend, Terminal};
 use ui_error::UiError;
 
 use crate::utils::events::{Event, EventStream};

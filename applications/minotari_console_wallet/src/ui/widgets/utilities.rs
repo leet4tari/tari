@@ -20,7 +20,7 @@
 // WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE
 // USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-use tui::{
+use ratatui::{
     backend::Backend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -61,7 +61,7 @@ pub fn centered_rect_absolute(width: u16, height: u16, r: Rect) -> Rect {
 // casting here is okay as we only use to draw
 #[allow(clippy::cast_possible_truncation)]
 pub fn draw_dialog<B>(
-    f: &mut Frame<B>,
+    f: &mut Frame,
     full_area: Rect,
     title: String,
     message: String,

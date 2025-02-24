@@ -25,7 +25,7 @@ use minotari_wallet::{error::WalletError, util::wallet_identity::WalletIdentity,
 use tari_common::exit_codes::{ExitCode, ExitError};
 use tari_comms::peer_manager::Peer;
 use tokio::runtime::Handle;
-use tui::{
+use ratatui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout},
     Frame,
@@ -201,7 +201,7 @@ impl<B: Backend> App<B> {
         self.tabs.on_tick(&mut self.app_state);
     }
 
-    pub fn draw(&mut self, f: &mut Frame<'_, B>) {
+    pub fn draw(&mut self, f: &mut Frame) {
         let max_width_layout = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Length(MAX_WIDTH), Constraint::Min(0)].as_ref())

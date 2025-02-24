@@ -7,11 +7,11 @@ use log::*;
 use tari_comms::peer_manager::Peer;
 use tari_utilities::hex::Hex;
 use tokio::runtime::Handle;
-use tui::{
+use ratatui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Span, Spans},
+    text::{Line, Span},
     widgets::{Block, Borders, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
@@ -60,7 +60,7 @@ impl NetworkTab {
         }
     }
 
-    pub fn draw_base_node_selection<B>(&mut self, f: &mut Frame<B>, area: Rect, app_state: &AppState)
+    pub fn draw_base_node_selection<B>(&mut self, f: &mut Frame, area: Rect, app_state: &AppState)
     where B: Backend {
         let block = Block::default().borders(Borders::ALL).title(Span::styled(
             "Base Node Selection",
@@ -73,7 +73,7 @@ impl NetworkTab {
             .margin(1)
             .split(area);
 
-        let instructions = Paragraph::new(Spans::from(vec![
+        let instructions = Paragraph::new(Line::from(vec![
             Span::raw("Press "),
             Span::styled("B", Style::default().add_modifier(Modifier::BOLD)),
             Span::raw(" and use "),
@@ -127,7 +127,7 @@ impl NetworkTab {
         column_list.render(f, areas[1], &mut base_node_list_state);
     }
 
-    fn draw_detailed_base_node<B>(&self, f: &mut Frame<B>, area: Rect, _app_state: &AppState)
+    fn draw_detailed_base_node<B>(&self, f: &mut Frame, area: Rect, _app_state: &AppState)
     where B: Backend {
         let block = Block::default().borders(Borders::ALL).title(Span::styled(
             "Base Node Detail",
@@ -176,7 +176,7 @@ impl NetworkTab {
         }
     }
 
-    pub fn draw_connected_peers_list<B>(&self, f: &mut Frame<B>, area: Rect, app_state: &AppState)
+    pub fn draw_connected_peers_list<B>(&self, f: &mut Frame, area: Rect, app_state: &AppState)
     where B: Backend {
         let block = Block::default().borders(Borders::ALL).title(Span::styled(
             "Connected Peers",
@@ -207,7 +207,7 @@ impl NetworkTab {
         column_list.render(f, list_areas[0], &mut ListState::default());
     }
 
-    pub fn draw_base_node_peer<B>(&self, f: &mut Frame<B>, area: Rect, app_state: &AppState)
+    pub fn draw_base_node_peer<B>(&self, f: &mut Frame, area: Rect, app_state: &AppState)
     where B: Backend {
         let block = Block::default().borders(Borders::ALL).title(Span::styled(
             "Base Node Peer",
@@ -239,7 +239,7 @@ impl NetworkTab {
             ]);
         }
 
-        let instructions_p = Paragraph::new(Spans::from(instructions)).block(Block::default());
+        let instructions_p = Paragraph::new(Line::from(instructions)).block(Block::default());
         f.render_widget(instructions_p, base_node_layout[0]);
 
         let peer = app_state.get_selected_base_node();
@@ -363,7 +363,7 @@ impl NetworkTab {
 impl<B: Backend> Component<B> for NetworkTab {
     // casting here is okay as wont have more than u16 base nodes
     #[allow(clippy::cast_possible_truncation)]
-    fn draw(&mut self, f: &mut Frame<B>, area: Rect, app_state: &AppState) {
+    fn draw(&mut self, f: &mut Frame, area: Rect, app_state: &AppState) {
         let areas = Layout::default()
             .constraints(
                 [

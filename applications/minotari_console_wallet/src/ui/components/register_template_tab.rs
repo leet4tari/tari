@@ -17,7 +17,7 @@ use tokio::{
     runtime::{Handle, Runtime},
     sync::watch,
 };
-use tui::{
+use ratatui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -144,7 +144,7 @@ impl RegisterTemplateTab {
     // casting here is okay as its only used to draw widths
     #[allow(clippy::cast_possible_truncation)]
     #[allow(clippy::too_many_lines)]
-    fn draw_form<B>(&self, f: &mut Frame<B>, area: Rect, _app_state: &AppState)
+    fn draw_form<B>(&self, f: &mut Frame, area: Rect, _app_state: &AppState)
     where B: Backend {
         let block = Block::default().borders(Borders::ALL).title(Span::styled(
             "Register Code Template",
@@ -341,31 +341,31 @@ impl RegisterTemplateTab {
 
         match self.input_mode {
             InputMode::None => (),
-            InputMode::FeePerGram => f.set_cursor(
+            InputMode::FeePerGram => f.set_cursor_position(
                 fourth_row_layout[2].x + self.fee_per_gram.width() as u16 + 1,
                 fourth_row_layout[2].y + 1,
             ),
-            InputMode::TemplateName => f.set_cursor(
+            InputMode::TemplateName => f.set_cursor_position(
                 second_row_layout[0].x + self.template_name.width() as u16 + 1,
                 second_row_layout[0].y + 1,
             ),
-            InputMode::TemplateVersion => f.set_cursor(
+            InputMode::TemplateVersion => f.set_cursor_position(
                 second_row_layout[1].x + self.template_version.width() as u16 + 1,
                 second_row_layout[1].y + 1,
             ),
-            InputMode::TemplateType => f.set_cursor(
+            InputMode::TemplateType => f.set_cursor_position(
                 second_row_layout[2].x + self.template_type.width() as u16 + 1,
                 second_row_layout[2].y + 1,
             ),
-            InputMode::BinaryUrl => f.set_cursor(
+            InputMode::BinaryUrl => f.set_cursor_position(
                 first_row_layout[0].x + self.binary_url.width() as u16 + 1,
                 first_row_layout[0].y + 1,
             ),
-            InputMode::RepositoryUrl => f.set_cursor(
+            InputMode::RepositoryUrl => f.set_cursor_position(
                 third_row_layout[0].x + self.repository_url.width() as u16 + 1,
                 third_row_layout[0].y + 1,
             ),
-            InputMode::RepositoryCommitHash => f.set_cursor(
+            InputMode::RepositoryCommitHash => f.set_cursor_position(
                 fourth_row_layout[1].x + self.repository_commit_hash.width() as u16 + 1,
                 fourth_row_layout[1].y + 1,
             ),
@@ -624,7 +624,7 @@ impl RegisterTemplateTab {
 
 impl<B: Backend> Component<B> for RegisterTemplateTab {
     #[allow(clippy::too_many_lines)]
-    fn draw(&mut self, f: &mut Frame<B>, area: Rect, app_state: &AppState) {
+    fn draw(&mut self, f: &mut Frame, area: Rect, app_state: &AppState) {
         let areas = Layout::default()
             .constraints(
                 [

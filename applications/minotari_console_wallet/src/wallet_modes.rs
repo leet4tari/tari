@@ -34,7 +34,7 @@ use tari_common_types::grpc_authentication::GrpcAuthentication;
 use tari_comms::{multiaddr::Multiaddr, peer_manager::Peer, utils::multiaddr::multiaddr_to_socketaddr};
 use tokio::{runtime::Handle, sync::broadcast};
 use tonic::transport::{Identity, Server, ServerTlsConfig};
-use tui::backend::CrosstermBackend;
+use ratatui::backend::CrosstermBackend;
 
 use crate::{
     automation::commands::command_runner,

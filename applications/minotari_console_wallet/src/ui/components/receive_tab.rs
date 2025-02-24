@@ -1,7 +1,7 @@
 // Copyright 2022 The Tari Project
 // SPDX-License-Identifier: BSD-3-Clause
 
-use tui::{
+use ratatui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -19,7 +19,7 @@ impl ReceiveTab {
         Self {}
     }
 
-    fn draw_whoami<B>(&self, f: &mut Frame<B>, area: Rect, app_state: &AppState)
+    fn draw_whoami<B>(&self, f: &mut Frame, area: Rect, app_state: &AppState)
     where B: Backend {
         let block = Block::default().borders(Borders::ALL).title(Span::styled(
             "Who Am I?",
@@ -138,7 +138,7 @@ impl ReceiveTab {
 }
 
 impl<B: Backend> Component<B> for ReceiveTab {
-    fn draw(&mut self, f: &mut Frame<B>, area: Rect, app_state: &AppState) {
+    fn draw(&mut self, f: &mut Frame, area: Rect, app_state: &AppState) {
         let areas = Layout::default()
             .constraints([Constraint::Min(42)].as_ref())
             .split(area);

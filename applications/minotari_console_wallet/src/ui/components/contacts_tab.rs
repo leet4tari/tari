@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use tokio::runtime::Handle;
-use tui::{
+use ratatui::{
     backend::Backend,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -46,7 +46,7 @@ impl ContactsTab {
         }
     }
 
-    fn draw_contacts<B>(&mut self, f: &mut Frame<B>, area: Rect, app_state: &AppState)
+    fn draw_contacts<B>(&mut self, f: &mut Frame, area: Rect, app_state: &AppState)
     where B: Backend {
         let block = Block::default().borders(Borders::ALL).title(Span::styled(
             "Contacts",
@@ -121,7 +121,7 @@ impl ContactsTab {
 
     // casting here is okay as we only use it to draw widths
     #[allow(clippy::cast_possible_truncation)]
-    fn draw_edit_contact<B>(&mut self, f: &mut Frame<B>, area: Rect, _app_state: &AppState)
+    fn draw_edit_contact<B>(&mut self, f: &mut Frame, area: Rect, _app_state: &AppState)
     where B: Backend {
         let popup_area = centered_rect_absolute(120, 10, area);
 
@@ -282,7 +282,7 @@ impl ContactsTab {
 }
 
 impl<B: Backend> Component<B> for ContactsTab {
-    fn draw(&mut self, f: &mut Frame<B>, area: Rect, app_state: &AppState) {
+    fn draw(&mut self, f: &mut Frame, area: Rect, app_state: &AppState) {
         self.draw_contacts(f, area, app_state);
         if self.show_edit_contact {
             self.draw_edit_contact(f, area, app_state);

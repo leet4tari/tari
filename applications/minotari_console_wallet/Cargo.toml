@@ -78,8 +78,9 @@ path = "../../base_layer/core"
 default-features = false
 features = ["transactions", "mempool_proto", "base_node_proto"]
 
-[dependencies.tui]
-version = "^0.16"
+#[dependencies.tui]
+[dependencies.ratatui]
+version = "^0.29"
 default-features = false
 features = ["crossterm"]
 

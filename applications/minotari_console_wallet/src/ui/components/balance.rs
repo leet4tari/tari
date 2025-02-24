@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 use tari_core::transactions::tari_amount::MicroMinotari;
-use tui::{
+use ratatui::{
     backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    text::{Span, Spans},
+    text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
@@ -22,7 +22,8 @@ impl Balance {
 }
 
 impl<B: Backend> Component<B> for Balance {
-    fn draw(&mut self, f: &mut Frame<B>, area: Rect, app_state: &AppState)
+//    fn draw(&mut self, f: &mut Frame<B>, area: Rect, app_state: &AppState)
+    fn draw(&mut self, f: &mut Frame, area: Rect, app_state: &AppState)
     where B: Backend {
         // This is a hack to produce only a top margin and not a bottom margin
         let block_title_body = Layout::default()
@@ -50,18 +51,18 @@ impl<B: Backend> Component<B> for Balance {
 
         let balance = app_state.get_balance();
         let time_locked = balance.time_locked_balance.unwrap_or_else(|| MicroMinotari::from(0u64));
-        let available_balance = Spans::from(vec![
+        let available_balance = Line::from(vec![
             Span::styled("Available:", Style::default().fg(Color::Magenta)),
             Span::raw(" "),
             Span::raw(format!("{}", balance.available_balance)),
             Span::raw(format!(" (Time Locked: {})", time_locked)),
         ]);
-        let incoming_balance = Spans::from(vec![
+        let incoming_balance = Line::from(vec![
             Span::styled("Pending Incoming:", Style::default().fg(Color::Magenta)),
             Span::raw(" "),
             Span::raw(format!("{}", balance.pending_incoming_balance)),
         ]);
-        let outgoing_balance = Spans::from(vec![
+        let outgoing_balance = Line::from(vec![
             Span::styled("Pending Outgoing:", Style::default().fg(Color::Magenta)),
             Span::raw(" "),
             Span::raw(format!("{}", balance.pending_outgoing_balance)),
