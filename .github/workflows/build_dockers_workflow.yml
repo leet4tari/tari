@@ -39,8 +39,7 @@ name: Build docker images - workflow_call/on-demand
 env:
   DAYS_to_EXPIRE: 30
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   envs_setup:
