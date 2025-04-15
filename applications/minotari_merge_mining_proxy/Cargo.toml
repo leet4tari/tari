@@ -35,7 +35,6 @@ clap = { version = "3.2", features = ["derive", "env"] }
 config = { version = "0.14.0" }
 crossterm = { version = "0.28" }
 futures = { version = "^0.3.16", features = ["async-await"] }
-futures-util = "0.3"
 hex = "0.4.2"
 hyper = { version = "0.14.12", features = ["default","server"] }
 jsonrpc = "0.12.0"
