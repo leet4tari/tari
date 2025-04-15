@@ -167,12 +167,15 @@ jobs:
             TARGET_LIBS+="--package ${LIB_FILE} "
           done
           echo "TARGET_LIBS=${TARGET_LIBS}" >> $GITHUB_ENV
-          TARI_BUILD_ISA_CPU=${{ matrix.builds.target }}
-          # Strip unknown part
-          TARI_BUILD_ISA_CPU=${TARI_BUILD_ISA_CPU//-unknown-linux-gnu}
-          # Strip gc used by rust
-          TARI_BUILD_ISA_CPU=${TARI_BUILD_ISA_CPU//gc}
-          echo "TARI_BUILD_ISA_CPU=${TARI_BUILD_ISA_CPU}" >> $GITHUB_ENV
+          if [[ "${{ matrix.builds.target }}" == *linux* ]]; then
+            TARI_BUILD_ISA_CPU=${{ matrix.builds.target }}
+            # Strip unknown part
+            TARI_BUILD_ISA_CPU=${TARI_BUILD_ISA_CPU//-unknown-linux-gnu}
+            # Strip gc used by rust
+            TARI_BUILD_ISA_CPU=${TARI_BUILD_ISA_CPU//gc}
+            echo "TARI_BUILD_ISA_CPU=${TARI_BUILD_ISA_CPU}" >> $GITHUB_ENV
+            echo "TARI_HOST_ISA_CPU=$(uname -m)" >> $GITHUB_ENV
+          fi
 
       - name: Scheduled Destination Folder Override
         if: ${{ github.event_name == 'schedule' && github.event.schedule == '05 00 * * *' }}
@@ -193,8 +196,8 @@ jobs:
           sudo apt-get update
           sudo bash scripts/install_ubuntu_dependencies.sh
 
-      - name: Install Linux dependencies - Ubuntu - cross-compiled ${{ env.TARI_BUILD_ISA_CPU }} on x86-64
-        if: ${{ startsWith(runner.os,'Linux') && ( ! matrix.builds.cross ) && matrix.builds.name != 'linux-x86_64' }}
+      - name: Install Linux dependencies - Ubuntu - cross-compiling ${{ env.TARI_BUILD_ISA_CPU }} on ${{ env.TARI_HOST_ISA_CPU }}
+        if: ${{ startsWith(runner.os,'Linux') && ( ! matrix.builds.cross ) && ( env.TARI_BUILD_ISA_CPU != env.TARI_HOST_ISA_CPU ) }}
         run: |
           sudo apt-get update
           sudo bash scripts/install_ubuntu_dependencies-cross_compile.sh ${{ env.TARI_BUILD_ISA_CPU }}
