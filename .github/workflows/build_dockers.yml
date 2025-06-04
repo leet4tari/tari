@@ -11,7 +11,9 @@ name: Build docker images
       - 'build-all-*'
       - 'build-dockers-*'
   schedule:
-    - cron: '05 00 * * *'
+    #- cron: '05 00 * * *'  # Daily build
+    - cron: '05 00 * * 0-5'  # Daily build, 5min past midnight, Sunday to Friday
+    - cron: '23 01 * * 0-5'  # MainNet Debug - Daily build at 01h23, Sunday to Friday
   workflow_dispatch:
     inputs:
 #      toolchain:
@@ -82,6 +84,8 @@ jobs:
     steps:
       - name: envs setup
         id: envs_setup
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
         shell: bash
         run: |
           echo "Workflow triggered by ${{ github.actor }} for ${{ github.event_name }}"
@@ -91,7 +95,6 @@ jobs:
           echo "VSHA_SHORT=${VSHA_SHORT}" >> $GITHUB_ENV
           TOOLCHAIN=${{ github.event.inputs.toolchain }}
           echo "toolchain=${TOOLCHAIN:-${{ env.toolchain_default }}}" >> $GITHUB_OUTPUT
-          echo "tari_network=${{ github.event.inputs.tari_network }}" >> $GITHUB_OUTPUT
           if [[ "${{ github.ref }}" =~ ^refs/tags/v* ]] && [ "${{ github.event_name }}" != "workflow_dispatch" ] ; then
             echo "Tagged Build - Build everything"
             VERSION="${{ github.ref_name }}_$(date -u '+%Y%m%d')_${VSHA_SHORT}"
@@ -115,6 +118,7 @@ jobs:
             echo "platforms=${{ github.event.inputs.platforms }}" >> $GITHUB_OUTPUT
             echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
             echo "tag_alias=${{ github.event.inputs.tag_alias }}" >> $GITHUB_OUTPUT
+            echo "tari_network=${{ github.event.inputs.tari_network }}" >> $GITHUB_OUTPUT
             echo "build_items=${{ github.event.inputs.build_items }}" >> $GITHUB_OUTPUT
           fi
           if [ "${{ github.event_name }}" == "schedule" ] ; then
@@ -128,6 +132,13 @@ jobs:
               echo "platforms=linux/amd64" >> $GITHUB_OUTPUT
               echo "tag_alias=latest-daily" >> $GITHUB_OUTPUT
               echo "build_items=minotari_all" >> $GITHUB_OUTPUT
+            fi
+            echo "Schedule: ${SCHEDULE} - $(date)"
+            if [[ "${SCHEDULE}" == "23 01 * * 0-5" ]]; then
+              echo "Daily Build - limited amd64/mainNet"
+              echo "tag_alias=latest-daily-mainnet" >> $GITHUB_OUTPUT
+              echo "tari_network=mainnet" >> $GITHUB_OUTPUT
+              echo "build_items=minotari_node" >> $GITHUB_OUTPUT
             fi
           fi
 
