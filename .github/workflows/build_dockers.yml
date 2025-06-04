@@ -31,6 +31,16 @@ name: Build docker images
           - linux/amd64
           - linux/arm64
           - linux/arm64, linux/amd64
+      tari_network:
+        default: esmeralda
+        description: 'target testNet'
+        type: choice
+        options:
+          - esmeralda
+          - nextnet
+          - stagenet
+          - mainnet
+          - igor
       build_items:
         default: minotari_all
         description: 'image(s) to build'
@@ -66,6 +76,7 @@ jobs:
       platforms: ${{ steps.envs_setup.outputs.platforms }}
       version: ${{ steps.envs_setup.outputs.version }}
       tag_alias: ${{ steps.envs_setup.outputs.tag_alias }}
+      tari_network: ${{ steps.envs_setup.outputs.tari_network }}
       build_items: ${{ steps.envs_setup.outputs.build_items }}
 
     steps:
@@ -80,6 +91,7 @@ jobs:
           echo "VSHA_SHORT=${VSHA_SHORT}" >> $GITHUB_ENV
           TOOLCHAIN=${{ github.event.inputs.toolchain }}
           echo "toolchain=${TOOLCHAIN:-${{ env.toolchain_default }}}" >> $GITHUB_OUTPUT
+          echo "tari_network=${{ github.event.inputs.tari_network }}" >> $GITHUB_OUTPUT
           if [[ "${{ github.ref }}" =~ ^refs/tags/v* ]] && [ "${{ github.event_name }}" != "workflow_dispatch" ] ; then
             echo "Tagged Build - Build everything"
             VERSION="${{ github.ref_name }}_$(date -u '+%Y%m%d')_${VSHA_SHORT}"
@@ -131,4 +143,5 @@ jobs:
       platforms: ${{ needs.builds_envs_setup.outputs.platforms }}
       version: ${{ needs.builds_envs_setup.outputs.version }}
       tag_alias: ${{ needs.builds_envs_setup.outputs.tag_alias }}
+      tari_network: ${{ needs.builds_envs_setup.outputs.tari_network }}
       build_items: ${{ needs.builds_envs_setup.outputs.build_items }}

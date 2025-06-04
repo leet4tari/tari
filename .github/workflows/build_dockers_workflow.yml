@@ -27,6 +27,9 @@ name: Build docker images - workflow_call/on-demand
       tag_alias:
         type: string
         description: 'build tag alias'
+      tari_network:
+        type: string
+        description: 'target testNet'
       build_items:
         type: string
         default: minotari_sha3_miner
@@ -105,15 +108,25 @@ jobs:
       - name: checkout tari
         uses: actions/checkout@v4
 
-      - name: Declare TestNet for tags
-        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      - name: Declare TestNet for tags/branches
+        id: set-tari-network
+        # if: ${{ ( startsWith(github.ref, 'refs/tags/v') ) || ( startsWith(github.ref, 'refs/heads/build-') ) }}
+        env:
+          GHA_NETWORK: ${{ github.ref_name }}
         shell: bash
         run: |
-          source ./buildtools/multinet_envs.sh ${{github.ref_name}}
-          echo ${TARI_NETWORK}
+          # source ./scripts/multinet_envs.sh "${{ env.GHA_NETWORK }}"
+          if [[ "${{ github.ref }}" =~ ^refs/tags/v* ]] && [ "${{ github.event_name }}" != "workflow_dispatch" ] ; then
+            source ./scripts/multinet_envs.sh "${{ env.GHA_NETWORK }}"
+          else
+            source ./scripts/multinet_envs.sh "${{ inputs.tari_network }}"
+          fi
+          echo "${TARI_NETWORK}"
           echo "TARI_NETWORK=${TARI_NETWORK}" >> $GITHUB_ENV
-          echo ${TARI_TARGET_NETWORK}
+          echo "TARI_NETWORK=${TARI_NETWORK}" >> $GITHUB_OUTPUT
+          echo "${TARI_TARGET_NETWORK}"
           echo "TARI_TARGET_NETWORK=${TARI_TARGET_NETWORK}" >> $GITHUB_ENV
+          echo "TARI_TARGET_NETWORK=${TARI_TARGET_NETWORK}" >> $GITHUB_OUTPUT
 
       - name: Setup expiration for none releases
         if: ${{ ! startsWith(github.ref, 'refs/tags/v') }}
