@@ -292,11 +292,13 @@ jobs:
         shell: bash
         working-directory: libffiss
         run: |
+          set -xo pipefail
           ls -alhtR
           find . -name "*.sha256" -type f -print | xargs cat >> libffiss.txt.sha256-combined
+          cat libffiss.txt.sha256-combined
           # Rewrite the file paths to include ${{ matrix.tari_networks }}
           awk -v net="${{ matrix.tari_networks }}" \
-            '{ sub(/libminotari_${{ matrix.libffis }}/, "libminotari_${{ matrix.libffis }}-" net, $2);
+            '{ sub(/lib${{ matrix.libffis }}/, "lib${{ matrix.libffis }}-" net, $2);
             print $1, $2 }' \
               libffiss.txt.sha256-combined > libffiss.txt.sha256-verify
           cat libffiss.txt.sha256-verify
