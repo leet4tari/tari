@@ -76,7 +76,7 @@ jobs:
             )
           done
           # Array to String - Setup the json build matrix
-          matrix=$(echo ${tempJQ[@]} | jq -s -c '{"builds": .}')
+          # matrix=$(echo ${tempJQ[@]} | jq -s -c '{"builds": .}')
 
           #
           ## Setup the json build matrix
