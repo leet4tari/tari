@@ -280,7 +280,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: libffiss
-          pattern: lib${{ matrix.libffis }}-ios-*
+          #pattern: lib${{ matrix.libffis }}-*-ios-*
+          pattern: lib${{ matrix.libffis }}-*
 
       - name: Verify checksums
         shell: bash
