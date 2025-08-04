@@ -136,13 +136,8 @@ jobs:
 
       - name: Declare TestNet for tags
         id: set-tari-network
-        # if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-        # env:
-        #   GHA_NETWORK: ${{ github.ref_name }}
-        #   # GHA_NETWORK: "v1.0.0-rc.4"
         shell: bash
         run: |
-          # source buildtools/multinet_envs.sh ${{ env.GHA_NETWORK }}
           source ./buildtools/multinet_envs.sh ${{ matrix.builds.tari_network }}
           echo ${TARI_NETWORK}
           echo ${TARI_TARGET_NETWORK}
@@ -241,7 +236,8 @@ jobs:
         run: |
           mkdir -p "${{ runner.temp }}/lib${{ matrix.libffis }}-${{ env.TARGET_PLATFORM }}-${{ env.TARGET_ARCH }}${{ env.TARGET_SIM }}"
           cd "${{ runner.temp }}/lib${{ matrix.libffis }}-${{ env.TARGET_PLATFORM }}-${{ env.TARGET_ARCH }}${{ env.TARGET_SIM }}"
-          cp -v "$GITHUB_WORKSPACE/target/${{ matrix.builds.target }}/release/lib${{ matrix.libffis }}.a" "lib${{ matrix.libffis }}.${{ env.TARGET_PLATFORM }}_${{ env.TARGET_ARCH }}${{ env.TARGET_SIM }}.a"
+          cp -v "$GITHUB_WORKSPACE/target/${{ matrix.builds.target }}/release/lib${{ matrix.libffis }}.a" \
+            "lib${{ matrix.libffis }}.${{ env.TARGET_PLATFORM }}_${{ env.TARGET_ARCH }}${{ env.TARGET_SIM }}.a"
           cp -v "$GITHUB_WORKSPACE/base_layer/${{ env.TARGET_NAME }}_ffi/${{ env.TARGET_NAME }}.h" lib${{ matrix.libffis }}.h
           if [ -f "$GITHUB_WORKSPACE/changelog-${{ env.TARI_NETWORK_CHANGELOG }}.md" ]; then
             cp -v "$GITHUB_WORKSPACE/changelog-${{ env.TARI_NETWORK_CHANGELOG }}.md" .
@@ -266,9 +262,7 @@ jobs:
     name: Assemble ${{ matrix.tari_networks }} multiArch for ${{ matrix.libffis }}
     # Disable iOS Assembly workflow
     #if: ${{ false }}
-    #continue-on-error: true
 
-    # Limits to only iOS builds?
     runs-on: macos-latest
     needs: [matrix-prep, builds]
 
@@ -286,7 +280,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: libffiss
-          #pattern: lib${{ matrix.libffis }}-*-ios-*
           pattern: lib${{ matrix.libffis }}-${{ matrix.tari_networks }}-*
 
       - name: Verify checksums
@@ -452,38 +445,10 @@ jobs:
           sha256sum -c libffiss.txt.sha256-verify
           rm -fv libffiss.txt.sha256-verify
 
-      - name: Archive iOS xcframework(s)
-        shell: bash
-        working-directory: libffiss
-        run: |
-          # Spaces are important - string to array
-          FFI_DIRS=( $(echo ${BUILD_LIBFFIS} | jq -r '.[]') )
-          mkdir -p releases
-          for FFI_DIR in "${FFI_DIRS[@]}"; do
-            echo "xcframework for ${FFI_DIR}"
-            if [ -d lib${FFI_DIR}-ios-xcframework ]; then
-              7z a lib${FFI_DIR}.ios-xcframework.zip lib${FFI_DIR}-ios-xcframework/*
-              rm -fvr lib${FFI_DIR}-ios-xcframework
-              shasum -a 256 \
-                "lib${FFI_DIR}.ios-xcframework.zip" \
-                  > "lib${FFI_DIR}.ios-xcframework.zip.sha256"
-              mv -v lib${FFI_DIR}.ios-xcframework.zip* releases
-            fi
-          done
-
-      - name: Release preparation from assets
-        shell: bash
-        working-directory: libffiss
-        run: |
-          find . -regextype posix-extended -regex '.*\.(a|h|md|sha256)' -type f \
-            -not \( -path "./releases" -prune \) \
-            -exec cp -fv {} ./releases/ \;
-          ls -alhtR
-
       - name: Create release
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "libffiss/releases/*"
+          artifacts: "libffiss/*"
           token: ${{ secrets.GITHUB_TOKEN }}
           prerelease: true
           draft: true
