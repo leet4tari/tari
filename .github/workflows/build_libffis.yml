@@ -433,6 +433,7 @@ jobs:
         with:
           path: libffiss
           pattern: lib*_archive
+          merge-multiple: true
 
       - name: Verify checksums
         shell: bash
