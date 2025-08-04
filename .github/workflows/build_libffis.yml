@@ -432,8 +432,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: libffiss
-          # pattern: lib${{ matrix.libffis }}-${{ matrix.tari_networks }}_archive.zip*
-          pattern: lib*-*_archive.zip*
+          pattern: lib*_archive
 
       - name: Verify checksums
         shell: bash
