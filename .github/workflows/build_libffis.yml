@@ -23,6 +23,7 @@ env:
   BUILD_LIBFFIS: '["minotari_wallet_ffi"]'
   BUILD_TARI_NETWORKS: '["mainnet","esme"]'
   matrix-json-file: '.github/workflows/build_libffis.json'
+  SHARUN: 'shasum --algorithm 256'
 
 concurrency:
   # https://docs.github.com/en/actions/examples/using-concurrency-expressions-and-a-test-matrix
@@ -261,8 +262,8 @@ jobs:
           name: lib${{ matrix.libffis }}-${{ matrix.builds.tari_network }}-${{ env.TARGET_PLATFORM }}-${{ env.TARGET_ARCH }}${{ env.TARGET_SIM }}
           path: ${{ runner.temp }}/lib${{ matrix.libffis }}-${{ env.TARGET_PLATFORM }}-${{ env.TARGET_ARCH }}${{ env.TARGET_SIM }}
 
-  ios_assemble:
-    name: Assemble iOS multiArch for ${{ matrix.libffis }}
+  multi_assemble:
+    name: Assemble ${{ matrix.tari_networks }} multiArch for ${{ matrix.libffis }}
     # Disable iOS Assembly workflow
     #if: ${{ false }}
     #continue-on-error: true
@@ -303,8 +304,9 @@ jobs:
               libffiss.txt.sha256-combined > libffiss.txt.sha256-verify
           cat libffiss.txt.sha256-verify
           sha256sum -c libffiss.txt.sha256-verify
+          rm -fv libffiss.txt.sha256-verify libffiss.txt.sha256-combined
 
-      - name: Assemble iOS universal libffis
+      - name: Assemble iOS universal libffis for ${{ matrix.tari_networks }}
         shell: bash
         working-directory: libffiss
         run: |
@@ -341,13 +343,13 @@ jobs:
               > "lib${{ matrix.libffis }}-${{ matrix.tari_networks }}-ios-universal/lib${{ matrix.libffis }}.ios_universal.sha256"
           ls -alhtR
 
-      - name: Upload iOS universal libffis artifacts
+      - name: Upload iOS universal libffis artifacts for ${{ matrix.tari_networks }}
         uses: actions/upload-artifact@v4
         with:
           name: lib${{ matrix.libffis }}-${{ matrix.tari_networks }}-ios-universal
           path: libffiss/lib${{ matrix.libffis }}-${{ matrix.tari_networks }}-ios-universal
 
-      - name: Assemble iOS libffis xcframework
+      - name: Assemble iOS libffis xcframework for ${{ matrix.tari_networks }}
         shell: bash
         working-directory: libffiss
         run: |
@@ -393,18 +395,41 @@ jobs:
               > "lib${{ matrix.libffis }}-${{ matrix.tari_networks }}-ios-xcframework/lib${{ matrix.libffis }}.ios_xcframework.sha256"
           ls -alhtR
 
-      - name: Upload iOS xcframework libffis artifacts
+      - name: Upload iOS xcframework libffis artifacts for ${{ matrix.tari_networks }}
         uses: actions/upload-artifact@v4
         with:
           name: lib${{ matrix.libffis }}-${{ matrix.tari_networks }}-ios-xcframework
           path: libffiss/lib${{ matrix.libffis }}-${{ matrix.tari_networks }}-ios-xcframework
+
+      - name: Assemble libffis archive for ${{ matrix.tari_networks }}
+        env:
+          BINFILE: "lib${{ matrix.libffis }}-${{ matrix.tari_networks }}_archive"
+        shell: bash
+        working-directory: libffiss
+        run: |
+          ls -alhtR
+          7z a "../${{ env.BINFILE }}.zip" *
+          cd ..
+          echo "Compute archive shasum"
+          ${SHARUN} "${{ env.BINFILE }}.zip" >> "${{ env.BINFILE }}.zip.sha256"
+          echo "Show the shasum"
+          cat "${{ env.BINFILE }}.zip.sha256"
+          echo "Checksum verification archive is "
+          ${SHARUN} --check "${{ env.BINFILE }}.zip.sha256"
+          ls -alht
+
+      - name: Upload libffis archive for ${{ matrix.tari_networks }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: lib${{ matrix.libffis }}-${{ matrix.tari_networks }}_archive
+          path: lib${{ matrix.libffis }}-${{ matrix.tari_networks }}_archive.zip*
 
   create_release:
     name: Create release for ffi libraries
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
 
     runs-on: ubuntu-latest
-    needs: [matrix-prep, builds, ios_assemble]
+    needs: [matrix-prep, builds, multi_assemble]
 
     permissions:
       contents: write
@@ -414,6 +439,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: libffiss
+          # pattern: lib${{ matrix.libffis }}-${{ matrix.tari_networks }}_archive.zip*
+          pattern: lib*-*_archive.zip*
 
       - name: Verify checksums
         shell: bash
@@ -423,7 +450,7 @@ jobs:
           find . -name "*.sha256" -type f -print | xargs cat >> libffiss.txt.sha256-verify
           cat libffiss.txt.sha256-verify
           sha256sum -c libffiss.txt.sha256-verify
-          rm -fv ibffiss.txt.sha256-verify
+          rm -fv libffiss.txt.sha256-verify
 
       - name: Archive iOS xcframework(s)
         shell: bash
