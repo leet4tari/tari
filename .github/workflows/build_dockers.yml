@@ -148,10 +148,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        tari_network: [esmeralda, nextnet]
     uses: ./.github/workflows/build_dockers_workflow.yml
     secrets: inherit
     with:
@@ -159,6 +155,5 @@ jobs:
       platforms: ${{ needs.base_builds_envs_setup.outputs.platforms }}
       version: ${{ needs.base_builds_envs_setup.outputs.version }}
       tag_alias: ${{ needs.base_builds_envs_setup.outputs.tag_alias }}
-      #tari_network: ${{ needs.base_builds_envs_setup.outputs.tari_network }}
-      tari_network: ${{ matrix.tari_network }}
+      tari_network: ${{ needs.base_builds_envs_setup.outputs.tari_network }}
       build_items: ${{ needs.base_builds_envs_setup.outputs.build_items }}
