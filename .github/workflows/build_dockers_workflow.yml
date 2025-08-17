@@ -79,22 +79,6 @@ jobs:
           echo "${matrix}" | jq .
           echo "matrix=${matrix}" >> $GITHUB_OUTPUT
 
-      - name: Declare TestNet for tags/branches
-        # Disabled
-        if: ${{ false }}
-        id: set-tari-network
-        shell: bash
-        run: |
-          if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] && [ -z "${{ inputs.tari_network }}" ]; then
-            # Case: A version tag push (e.g., v1.0.0), not manually triggered
-            echo "Using $GITHUB_REF_NAME for multinet_envs.sh"
-            source ./buildtools/multinet_envs.sh "$GITHUB_REF_NAME"
-          else
-            # Case: Manually triggered workflow, or non-tag
-            echo "Using ${{ inputs.tari_network }} for multinet_envs.sh"
-            source ./buildtools/multinet_envs.sh "${{ inputs.tari_network }}"
-          fi
-
   docker_builds:
     name: Docker ${{ matrix.builds.arch }} ${{ matrix.builds.image_name }} build
     needs: builds_envs_setup
@@ -110,10 +94,6 @@ jobs:
       packages: write
 
     runs-on: ${{ matrix.builds.runner }}
-
-    # env:
-    #   TARI_NETWORK: ${{ needs.builds_envs_setup.outputs.TARI_NETWORK }}
-    #   TARI_TARGET_NETWORK: ${{ needs.builds_envs_setup.outputs.TARI_TARGET_NETWORK }}
 
     steps:
       - name: checkout tari
@@ -258,20 +238,19 @@ jobs:
       - name: Pre for multi-arch image merge
         env:
           BMATRIX: ${{ needs.builds_envs_setup.outputs.matrix }}
-          # TARI_NETWORK: ${{ needs.builds_envs_setup.outputs.TARI_NETWORK }}
         run: |
-          # set -xuo pipefail
+          set -xuo pipefail
           echo '${{ env.BMATRIX }}' | jq -r
 
           # Get all multi-arch image_names (have both amd64 and arm64), with version
           mapfile -t multiarch_images < <(
             echo '${{ env.BMATRIX }}' | jq -r '
               .builds
-                | group_by(.image_name)
+                | group_by([.image_name, .tari_network])
                 | map(select((map(.arch) | index("amd64")) and (map(.arch) | index("arm64"))))
-                | map({image_name: .[0].image_name, version: .[0].version})
+                | map({image_name: .[0].image_name, version: .[0].version, tari_network: .[0].tari_network})
                 | unique
-                | map("\(.image_name):\(.version)")
+                | map("\(.image_name):\(.version):\(.tari_network)")
                 | .[]
               '
             )
@@ -289,10 +268,13 @@ jobs:
             echo "Found ${#multiarch_images[@]} multi-arch Docker images."
             echo "${multiarch_images[*]}"
             for DENTRY in "${multiarch_images[@]}"; do
-              DNAME="${DENTRY%%:*}"
-              DVERSION="${DENTRY##*:}"
+              DNAME="${DENTRY%%:*}"             # before first :
+              REST="${DENTRY#*:}"               # drop first :
+              DVERSION="${REST%%:*}"            # version
+              DNETWORK="${REST##*:}"            # tari_network
+
               if [ "${DNAME:0:9}" = "minotari_" ] ; then
-                DSUFFIX=-${{ env.TARI_NETWORK }}
+                DSUFFIX=-${DNETWORK}
               else
                 DSUFFIX=
               fi
