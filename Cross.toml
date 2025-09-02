@@ -20,6 +20,8 @@ passthrough = [
   "TARI_NETWORK",
   "TARI_TARGET_NETWORK",
   "TARI_NETWORK_DIR",
+  "ANDROID_NDK",
+  "ANDROID_SDK",
 ]
 
 [target.x86_64-linux-android]
