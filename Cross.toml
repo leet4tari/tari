@@ -29,14 +29,17 @@ export DEBIAN_FRONTEND=noninteractive && \
 apt-get update && \
 apt-get --assume-yes --no-install-recommends install \
  curl unzip && \
-curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v30.2/protoc-30.2-linux-x86_64.zip && \
-unzip -o protoc-30.2-linux-x86_64.zip -d /usr/ && \
+export protoc_version=32.0 && \
+curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v${protoc_version}/protoc-${protoc_version}-linux-x86_64.zip && \
+unzip -o protoc-${protoc_version}-linux-x86_64.zip -d /usr/ && \
 /usr/bin/protoc --version
 """ ]
 
 [target.x86_64-linux-android.env]
 passthrough = [
   "CFLAGS=-DMDB_USE_ROBUST=0",
+  "ANDROID_NDK=r28c",
+  "ANDROID_SDK=28",
 ]
 
 [target.aarch64-linux-android]
@@ -46,14 +49,17 @@ export DEBIAN_FRONTEND=noninteractive && \
 apt-get update && \
 apt-get --assume-yes --no-install-recommends install \
  curl unzip && \
-curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v30.2/protoc-30.2-linux-x86_64.zip && \
-unzip -o protoc-30.2-linux-x86_64.zip -d /usr/ && \
+export protoc_version=32.0 && \
+curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v${protoc_version}/protoc-${protoc_version}-linux-x86_64.zip && \
+unzip -o protoc-${protoc_version}-linux-x86_64.zip -d /usr/ && \
 /usr/bin/protoc --version
 """ ]
 
 [target.aarch64-linux-android.env]
 passthrough = [
   "CFLAGS=-DMDB_USE_ROBUST=0",
+  "ANDROID_NDK=r28c",
+  "ANDROID_SDK=28",
 ]
 
 # Currently needs cross-rs from git ```cargo install cross --git https://github.com/cross-rs/cross```
