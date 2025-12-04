@@ -79,10 +79,12 @@ RUN if [ -n "${RUST_TOOLCHAIN}" ] ; then \
 #    rustup target list --installed && \
 #    rustup toolchain list
 
-RUN cargo build ${RUST_TARGET} \
+RUN cargo build \
+      $( [ -n "${RUST_TARGET}" ] && echo --target "${RUST_TARGET}" ) \
       --bin ${APP_EXEC} --release --features ${FEATURES} --locked && \
     # Copy executable out of the cache so it is available in the runtime image.
-    cp -v /tari/target/${BUILD_TARGET}release/${APP_EXEC} /tari/${APP_EXEC}
+    ls -l /tari/target/${RUST_TARGET:+$RUST_TARGET/}release/tari_* && \
+    cp -v /tari/target/${RUST_TARGET:+$RUST_TARGET/}release/${APP_EXEC} /tari/${APP_EXEC}
 
 # https://hub.docker.com/_/debian
 # Create runtime base minimal image for the target platform executables
@@ -160,8 +162,8 @@ RUN if [ "${APP_NAME}" = "node" ] ; then \
 
 USER tari
 
-COPY --from=builder /tari/$APP_EXEC /usr/local/bin/
-COPY buildtools/docker_rig/start_tari_app.sh /usr/local/bin/start_tari_app.sh
+COPY --chown=tari:tari --from=builder /tari/$APP_EXEC /usr/local/bin/
+COPY --chown=tari:tari buildtools/docker_rig/start_tari_app.sh /usr/local/bin/start_tari_app.sh
 
 ENTRYPOINT [ "start_tari_app.sh" ]
 CMD [ "--non-interactive-mode" ]
