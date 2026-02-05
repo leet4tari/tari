@@ -348,6 +348,7 @@ async fn test_utxo_selection_no_chain_metadata() {
         unspent.push((uo.output_hash(), true));
     }
     backend.mark_outputs_as_unspent(unspent).unwrap();
+
     // but we have no chain state so the lowest maturity should be used
     let _tx_builder = oms
         .prepare_transaction_to_send(
@@ -361,8 +362,14 @@ async fn test_utxo_selection_no_chain_metadata() {
         )
         .await
         .unwrap();
+    // test that lowest 2 maturities were encumbered
     let utxos = oms.get_unspent_outputs().await.unwrap();
-    assert_eq!(utxos.len(), 9);
+    assert_eq!(utxos.len(), 8);
+    for (index, utxo) in utxos.iter().enumerate() {
+        let i = index as u64 + 3;
+        assert_eq!(utxo.wallet_output.features().maturity, i);
+        assert_eq!(utxo.wallet_output.value(), i * amount);
+    }
 
     // test that we can get a fee estimate with no chain metadata
     let fee = oms
@@ -410,7 +417,12 @@ async fn test_utxo_selection_no_chain_metadata() {
 
     // test that largest utxo was encumbered
     let utxos = oms.get_unspent_outputs().await.unwrap();
-    assert_eq!(utxos.len(), 8);
+    assert_eq!(utxos.len(), 7);
+    for (index, utxo) in utxos.iter().enumerate() {
+        let i = index as u64 + 3;
+        assert_eq!(utxo.wallet_output.features().maturity, i);
+        assert_eq!(utxo.wallet_output.value(), i * amount);
+    }
 }
 
 #[tokio::test]
@@ -475,7 +487,7 @@ async fn test_utxo_selection_with_chain_metadata() {
     let expected_fee = fee_calc.calculate(
         fee_per_gram,
         1,
-        1,
+        2,
         3,
         default_features_and_scripts_size_byte_size()
             .expect("Failed to get default features and scripts size byte size") *
@@ -524,8 +536,15 @@ async fn test_utxo_selection_with_chain_metadata() {
         .await
         .unwrap();
 
+    // test that utxos with the lowest 2 maturities were encumbered
     let utxos = oms.get_unspent_outputs().await.unwrap();
-    assert_eq!(utxos.len(), 8);
+    assert_eq!(utxos.len(), 7);
+    for utxo in &utxos {
+        assert_ne!(utxo.wallet_output.features().maturity, 1);
+        assert_ne!(utxo.wallet_output.value(), amount);
+        assert_ne!(utxo.wallet_output.features().maturity, 2);
+        assert_ne!(utxo.wallet_output.value(), 2 * amount);
+    }
 
     // when the amount is greater than the largest utxo, then "Largest" selection strategy is used
     let _tx_builder = oms
@@ -541,8 +560,15 @@ async fn test_utxo_selection_with_chain_metadata() {
         .await
         .unwrap();
 
+    // test that utxos with the highest spendable 2 maturities were encumbered
     let utxos = oms.get_unspent_outputs().await.unwrap();
-    assert_eq!(utxos.len(), 6);
+    assert_eq!(utxos.len(), 5);
+    for utxo in &utxos {
+        assert_ne!(utxo.wallet_output.features().maturity, 4);
+        assert_ne!(utxo.wallet_output.value(), 4 * amount);
+        assert_ne!(utxo.wallet_output.features().maturity, 5);
+        assert_ne!(utxo.wallet_output.value(), 5 * amount);
+    }
 }
 
 #[tokio::test]
